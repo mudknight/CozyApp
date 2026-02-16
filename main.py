@@ -116,6 +116,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.gen_queue = queue.Queue()
         self.is_processing = False
         self.debounce_timers = []
+        self.current_pixbuf = None
 
         # Connect to destroy signal for cleanup
         self.connect("close-request", self.on_close_request)
@@ -253,14 +254,46 @@ class ComfyWindow(Adw.ApplicationWindow):
         for side in ["top", "bottom", "start", "end"]:
             getattr(picture_scroll, f"set_margin_{side}")(20)
         
+        # Create overlay for magnifier
+        self.picture_overlay = Gtk.Overlay()
+        
         self.picture = Gtk.Picture(
             content_fit=Gtk.ContentFit.CONTAIN,
             can_shrink=True
         )
-        picture_scroll.set_child(self.picture)
+        self.picture_overlay.set_child(self.picture)
+        
+        # Create magnifier frame
+        self.magnifier_frame = Gtk.Frame(
+            css_classes=['magnifier-frame']
+        )
+        self.magnifier_frame.set_visible(False)
+        self.magnifier_frame.set_size_request(200, 200)
+        # Make magnifier non-interactive so it doesn't block mouse events
+        self.magnifier_frame.set_can_target(False)
+        
+        self.magnifier_picture = Gtk.Picture(
+            content_fit=Gtk.ContentFit.FILL
+        )
+        self.magnifier_picture.set_can_target(False)
+        self.magnifier_frame.set_child(self.magnifier_picture)
+        
+        self.picture_overlay.add_overlay(self.magnifier_frame)
+        
+        picture_scroll.set_child(self.picture_overlay)
         preview_panel.append(picture_scroll)
         self.preview_revealer.set_child(preview_panel)
-        self.preview_revealer.set_child(preview_panel)
+
+        # Add motion controller for magnifier
+        motion_controller = Gtk.EventControllerMotion()
+        motion_controller.connect("motion", self.on_picture_motion)
+        motion_controller.connect("leave", self.on_picture_leave)
+        motion_controller.connect("enter", self.on_picture_enter)
+        self.picture.add_controller(motion_controller)
+        
+        # Store default cursor
+        self.default_cursor = None
+        self.crosshair_cursor = Gdk.Cursor.new_from_name("crosshair")
 
         self.setup_keybinds()
 
@@ -281,6 +314,152 @@ class ComfyWindow(Adw.ApplicationWindow):
                 pass
         self.debounce_timers.clear()
         return False
+
+    def is_image_downscaled(self):
+        """Check if the current image is being downscaled."""
+        if not self.current_pixbuf:
+            return False
+
+        paintable = self.picture.get_paintable()
+        if not paintable:
+            return False
+
+        # Get original dimensions
+        orig_width = self.current_pixbuf.get_width()
+        orig_height = self.current_pixbuf.get_height()
+
+        # Get displayed dimensions
+        display_width = self.picture.get_width()
+        display_height = self.picture.get_height()
+
+        # Check if image is smaller than original
+        return (display_width < orig_width or
+                display_height < orig_height)
+
+    def on_picture_enter(self, controller, x, y):
+        """Handle mouse entering the picture."""
+        if self.is_image_downscaled():
+            self.picture.set_cursor(self.crosshair_cursor)
+        else:
+            if self.default_cursor is None:
+                self.default_cursor = self.picture.get_cursor()
+            self.picture.set_cursor(self.default_cursor)
+
+    def on_picture_motion(self, controller, x, y):
+        """Handle mouse motion over the picture."""
+        if not self.is_image_downscaled():
+            if self.magnifier_frame.get_visible():
+                self.magnifier_frame.set_visible(False)
+            self.picture.set_cursor(self.default_cursor)
+            return
+
+        # Set crosshair cursor
+        self.picture.set_cursor(self.crosshair_cursor)
+
+        # Show magnifier
+        if not self.magnifier_frame.get_visible():
+            self.magnifier_frame.set_visible(True)
+
+        # Update magnifier position and content
+        self.update_magnifier(x, y)
+
+    def on_picture_leave(self, controller):
+        """Handle mouse leaving the picture."""
+        if self.magnifier_frame.get_visible():
+            self.magnifier_frame.set_visible(False)
+        self.picture.set_cursor(self.default_cursor)
+
+    def update_magnifier(self, x, y):
+        """Update the magnifier position and displayed region."""
+        if not self.current_pixbuf:
+            return
+
+        # Get dimensions
+        orig_width = self.current_pixbuf.get_width()
+        orig_height = self.current_pixbuf.get_height()
+        display_width = self.picture.get_width()
+        display_height = self.picture.get_height()
+
+        if display_width == 0 or display_height == 0:
+            return
+
+        # Calculate which part of the original image is shown
+        scale = min(
+            display_width / orig_width,
+            display_height / orig_height
+        )
+        scaled_width = orig_width * scale
+        scaled_height = orig_height * scale
+
+        # Calculate offset (image is centered)
+        x_offset = (display_width - scaled_width) / 2
+        y_offset = (display_height - scaled_height) / 2
+
+        # Convert mouse position to original image coordinates
+        img_x = (x - x_offset) / scale
+        img_y = (y - y_offset) / scale
+
+        # Clamp to image bounds
+        img_x = max(0, min(img_x, orig_width))
+        img_y = max(0, min(img_y, orig_height))
+
+        # Define magnified region size (in original image coordinates)
+        mag_size = 100
+        half_size = mag_size // 2
+
+        # Calculate crop region
+        crop_x = int(max(0, img_x - half_size))
+        crop_y = int(max(0, img_y - half_size))
+        crop_width = int(
+            min(mag_size, orig_width - crop_x)
+        )
+        crop_height = int(
+            min(mag_size, orig_height - crop_y)
+        )
+
+        if crop_width <= 0 or crop_height <= 0:
+            return
+
+        # Create subpixbuf for the region
+        try:
+            subpixbuf = self.current_pixbuf.new_subpixbuf(
+                crop_x, crop_y, crop_width, crop_height
+            )
+
+            # Convert to texture
+            width = subpixbuf.get_width()
+            height = subpixbuf.get_height()
+            rowstride = subpixbuf.get_rowstride()
+            has_alpha = subpixbuf.get_has_alpha()
+            pixels = subpixbuf.get_pixels()
+
+            gbytes = GLib.Bytes.new(pixels)
+            fmt = (Gdk.MemoryFormat.R8G8B8A8 if has_alpha
+                   else Gdk.MemoryFormat.R8G8B8)
+
+            texture = Gdk.MemoryTexture.new(
+                width, height, fmt, gbytes, rowstride
+            )
+            self.magnifier_picture.set_paintable(texture)
+
+            # Position magnifier frame centered under cursor
+            mag_width = 200
+            mag_height = 200
+            mag_x = x - mag_width / 2
+            mag_y = y - mag_height / 2
+
+            # Keep magnifier within picture bounds
+            mag_x = max(0, min(mag_x, display_width - mag_width))
+            mag_y = max(0, min(mag_y, display_height - mag_height))
+
+            # Set position using margin
+            self.magnifier_frame.set_margin_start(int(mag_x))
+            self.magnifier_frame.set_margin_top(int(mag_y))
+            self.magnifier_frame.set_halign(Gtk.Align.START)
+            self.magnifier_frame.set_valign(Gtk.Align.START)
+
+        except Exception as e:
+            self.log(f"Magnifier error: {e}")
 
     def setup_keybinds(self):
         """
@@ -326,6 +505,12 @@ class ComfyWindow(Adw.ApplicationWindow):
             .debug-text { font-family: monospace; font-size: 11px; opacity: 0.8; }
             separator { background-color: transparent; }
             gutter { background-color: alpha(@view_fg_color, 0.05); border-right: 1px solid alpha(@view_fg_color, 0.1); }
+            .magnifier-frame {
+                border: 2px solid alpha(currentColor, 0.3);
+                border-radius: 8px;
+                background-color: @window_bg_color;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            }
         """
         css_provider.load_from_data(css_content, len(css_content))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(
@@ -879,6 +1064,9 @@ class ComfyWindow(Adw.ApplicationWindow):
             loader.close()
             pix = loader.get_pixbuf()
             if pix:
+                # Store pixbuf for magnifier
+                self.current_pixbuf = pix
+
                 # Use MemoryTexture instead of deprecated new_for_pixbuf
                 width = pix.get_width()
                 height = pix.get_height()
