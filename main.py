@@ -316,6 +316,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.style_dropdown.set_model(Gtk.StringList.new(styles))
         if self.workflow_data:
             self.sync_ui_from_json()
+        self.load_saved_state()
 
     def create_scrolled(self, child):
         sc = Gtk.ScrolledWindow(
@@ -635,6 +636,60 @@ class ComfyWindow(Adw.ApplicationWindow):
             elif node.get("class_type") == LOADER_NODE_CLASS:
                 self.seed_adj.set_value(float(node["inputs"].get("seed", 0)))
 
+    def save_current_state(self):
+        """
+        Save current input field values to state.json.
+        """
+        pos = self.pos_buffer.get_text(
+            self.pos_buffer.get_start_iter(),
+            self.pos_buffer.get_end_iter(), False
+        )
+        neg = self.neg_buffer.get_text(
+            self.neg_buffer.get_start_iter(),
+            self.neg_buffer.get_end_iter(), False
+        )
+        sel_idx = self.style_dropdown.get_selected()
+        style = (
+            self.style_list[sel_idx]
+            if self.style_list and sel_idx != Gtk.INVALID_LIST_POSITION
+            else None
+        )
+
+        state = {
+            "style": style,
+            "positive": pos,
+            "negative": neg
+        }
+
+        try:
+            with open('state.json', 'w', encoding='utf-8') as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            self.log(f"Error saving state: {e}")
+
+    def load_saved_state(self):
+        """
+        Load input field values from state.json if it exists.
+        """
+        try:
+            with open('state.json', 'r', encoding='utf-8') as f:
+                state = json.load(f)
+
+            if "positive" in state:
+                self.pos_buffer.set_text(state["positive"])
+            if "negative" in state:
+                self.neg_buffer.set_text(state["negative"])
+            if "style" in state and state["style"] in self.style_list:
+                self.style_dropdown.set_selected(
+                    self.style_list.index(state["style"])
+                )
+
+            self.log("Loaded saved state from state.json")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            self.log(f"Error loading state: {e}")
+
     def on_stop_clicked(self, _):
         try:
             requests.post(f"http://{SERVER_ADDRESS}/interrupt", timeout=5)
@@ -647,6 +702,8 @@ class ComfyWindow(Adw.ApplicationWindow):
             return
         if self.seed_mode_combo.get_selected() == 0:
             self.seed_adj.set_value(float(random.randint(0, 2**32)))
+
+        self.save_current_state()
 
         current_seed = int(self.seed_adj.get_value())
         pos = self.pos_buffer.get_text(
