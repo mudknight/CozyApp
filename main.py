@@ -454,15 +454,28 @@ class ComfyWindow(Adw.ApplicationWindow):
         mag_size = self.magnifier_size // 2
         half_size = mag_size // 2
 
-        # Calculate crop region
-        crop_x = int(max(0, img_x - half_size))
-        crop_y = int(max(0, img_y - half_size))
-        crop_width = int(
-            min(mag_size, orig_width - crop_x)
-        )
-        crop_height = int(
-            min(mag_size, orig_height - crop_y)
-        )
+        # Calculate crop region centered on cursor
+        crop_x = int(img_x - half_size)
+        crop_y = int(img_y - half_size)
+
+        # Adjust crop position to keep it within bounds while maintaining
+        # size
+        if crop_x < 0:
+            crop_x = 0
+        elif crop_x + mag_size > orig_width:
+            crop_x = orig_width - mag_size
+
+        if crop_y < 0:
+            crop_y = 0
+        elif crop_y + mag_size > orig_height:
+            crop_y = orig_height - mag_size
+
+        # Ensure we're still within bounds after adjustment
+        crop_x = max(0, min(crop_x, orig_width - mag_size))
+        crop_y = max(0, min(crop_y, orig_height - mag_size))
+
+        crop_width = mag_size
+        crop_height = mag_size
 
         if crop_width <= 0 or crop_height <= 0:
             return
