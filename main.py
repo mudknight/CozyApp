@@ -117,6 +117,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.is_processing = False
         self.debounce_timers = []
         self.current_pixbuf = None
+        self.magnifier_size = 200
+        self.last_cursor_x = 0
+        self.last_cursor_y = 0
 
         # Connect to destroy signal for cleanup
         self.connect("close-request", self.on_close_request)
@@ -268,7 +271,9 @@ class ComfyWindow(Adw.ApplicationWindow):
             css_classes=['magnifier-frame']
         )
         self.magnifier_frame.set_visible(False)
-        self.magnifier_frame.set_size_request(200, 200)
+        self.magnifier_frame.set_size_request(
+            self.magnifier_size, self.magnifier_size
+        )
         # Make magnifier non-interactive so it doesn't block mouse events
         self.magnifier_frame.set_can_target(False)
         
@@ -290,6 +295,14 @@ class ComfyWindow(Adw.ApplicationWindow):
         motion_controller.connect("leave", self.on_picture_leave)
         motion_controller.connect("enter", self.on_picture_enter)
         self.picture.add_controller(motion_controller)
+        
+        # Add scroll controller for magnifier size adjustment
+        scroll_controller = Gtk.EventControllerScroll()
+        scroll_controller.set_flags(
+            Gtk.EventControllerScrollFlags.VERTICAL
+        )
+        scroll_controller.connect("scroll", self.on_picture_scroll)
+        self.picture.add_controller(scroll_controller)
         
         # Store default cursor
         self.default_cursor = None
@@ -345,8 +358,36 @@ class ComfyWindow(Adw.ApplicationWindow):
                 self.default_cursor = self.picture.get_cursor()
             self.picture.set_cursor(self.default_cursor)
 
+    def on_picture_scroll(self, controller, dx, dy):
+        """Handle scroll wheel to adjust magnifier size."""
+        if not self.is_image_downscaled():
+            return False
+
+        # Adjust size based on scroll direction
+        # dy > 0 means scroll down (smaller), dy < 0 means scroll up (larger)
+        size_change = -10 if dy > 0 else 10
+        new_size = self.magnifier_size + size_change
+
+        # Limit size between 100 and 400 pixels
+        new_size = max(100, min(400, new_size))
+
+        if new_size != self.magnifier_size:
+            self.magnifier_size = new_size
+            self.magnifier_frame.set_size_request(
+                self.magnifier_size, self.magnifier_size
+            )
+
+            # Update magnifier at last known cursor position
+            self.update_magnifier(self.last_cursor_x, self.last_cursor_y)
+
+        return True
+
     def on_picture_motion(self, controller, x, y):
         """Handle mouse motion over the picture."""
+        # Store cursor position
+        self.last_cursor_x = x
+        self.last_cursor_y = y
+
         if not self.is_image_downscaled():
             if self.magnifier_frame.get_visible():
                 self.magnifier_frame.set_visible(False)
@@ -404,7 +445,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         img_y = max(0, min(img_y, orig_height))
 
         # Define magnified region size (in original image coordinates)
-        mag_size = 100
+        # Show region that's half the magnifier size for 2x magnification
+        mag_size = self.magnifier_size // 2
         half_size = mag_size // 2
 
         # Calculate crop region
@@ -443,8 +485,8 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.magnifier_picture.set_paintable(texture)
 
             # Position magnifier frame centered under cursor
-            mag_width = 200
-            mag_height = 200
+            mag_width = self.magnifier_size
+            mag_height = self.magnifier_size
             mag_x = x - mag_width / 2
             mag_y = y - mag_height / 2
 
