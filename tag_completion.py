@@ -90,12 +90,18 @@ class TagCompletion:
         Returns:
             List of matching tag suggestions (max 10)
         """
-        words = text.replace(',', ' ').split()
-        if not words:
+        # Split by commas to preserve multi-word tags
+        tags = text.split(',')
+        if not tags:
             return []
-        current = words[-1].lower()
+        current = tags[-1].strip().lower()
         if len(current) < 2:
             return []
+
+        # Normalize search term: spaces -> underscores,
+        # escaped parens -> normal parens
+        current = current.replace(' ', '_')
+        current = current.replace('\\(', '(').replace('\\)', ')')
 
         matches = []
         seen = set()
@@ -297,12 +303,18 @@ class TagCompletion:
         iter_cursor = buffer.get_iter_at_mark(cursor)
 
         iter_start = iter_cursor.copy()
+        # Look back until comma or newline (not space, since tags
+        # can have spaces)
         while not iter_start.starts_line():
             iter_start.backward_char()
             char = iter_start.get_char()
-            if char in ' ,\n\t':
+            if char in ',\n':
                 iter_start.forward_char()
                 break
+
+        # Skip leading whitespace after comma
+        while iter_start.get_char() in ' \t':
+            iter_start.forward_char()
 
         formatted_tag = tag.replace('_', ' ')
         formatted_tag = formatted_tag.replace(
