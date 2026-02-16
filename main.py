@@ -1,4 +1,4 @@
-from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource
 import sys
 import json
 import uuid
@@ -8,10 +8,49 @@ import requests
 import websocket
 import csv
 import gi
+import tempfile
+import os
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('GdkPixbuf', '2.0')
+gi.require_version('GtkSource', '5')
+
+
+def setup_language_manager():
+    """Set up the custom language definition for # comments before any GtkSource usage"""
+    lang_xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<language id="prompt-tags" name="Prompt Tags" version="2.0" _section="Other">
+  <metadata>
+    <property name="globs">*.txt</property>
+  </metadata>
+  <styles>
+    <style id="comment" name="Comment" map-to="def:comment"/>
+  </styles>
+  <definitions>
+    <context id="prompt-tags">
+      <include>
+        <context id="comment" style-ref="comment">
+          <start>#</start>
+          <end>$</end>
+        </context>
+      </include>
+    </context>
+  </definitions>
+</language>'''
+    
+    # Create a temporary language file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.lang', delete=False) as f:
+        f.write(lang_xml)
+        lang_file = f.name
+    
+    # Create language manager and add our temp file BEFORE any languages are loaded
+    lang_manager = GtkSource.LanguageManager.get_default()
+    lang_dirs = lang_manager.get_search_path()
+    lang_dirs.append(os.path.dirname(lang_file))
+    lang_manager.set_search_path(lang_dirs)
+    
+    return lang_file
 
 
 SERVER_ADDRESS = "127.0.0.1:8188"
@@ -27,6 +66,8 @@ class ComfyApp(Adw.Application):
                          flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE, **kwargs)
         self.connect('activate', self.on_activate)
         self.workflow_file = None
+        # Set up language manager early, before any GtkSource views are created
+        self._lang_file = setup_language_manager()
 
     def do_command_line(self, command_line):
         args = command_line.get_arguments()
@@ -51,7 +92,7 @@ class ComfyApp(Adw.Application):
 class ComfyWindow(Adw.ApplicationWindow):
     def __init__(self, workflow_file=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.set_title("ComfyUI Prompt Editor")
+        self.set_title("ComfierUI")
         self.set_default_size(1200, 900)
         self.workflow_file = workflow_file
 
@@ -108,12 +149,14 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
         self.input_area.append(self.style_dropdown)
 
-        self.pos_buffer = Gtk.TextBuffer()
+        self.pos_buffer = GtkSource.Buffer()
+        self.setup_comment_highlighting(self.pos_buffer)
         self.input_area.append(Gtk.Label(label="Positive Prompt", xalign=0))
         pos_scrolled, self.pos_textview = self.create_scrolled_textview(self.pos_buffer)
         self.input_area.append(pos_scrolled)
 
-        self.neg_buffer = Gtk.TextBuffer()
+        self.neg_buffer = GtkSource.Buffer()
+        self.setup_comment_highlighting(self.neg_buffer)
         self.input_area.append(Gtk.Label(label="Negative Prompt", xalign=0))
         neg_scrolled, self.neg_textview = self.create_scrolled_textview(self.neg_buffer)
         self.input_area.append(neg_scrolled)
@@ -183,6 +226,14 @@ class ComfyWindow(Adw.ApplicationWindow):
         if self.workflow_file:
             self.load_workflow_file(self.workflow_file)
 
+    def setup_comment_highlighting(self, buffer):
+        """Apply the custom language definition for # comments"""
+        # Get the language (already set up by setup_language_manager)
+        lang_manager = GtkSource.LanguageManager.get_default()
+        lang = lang_manager.get_language("prompt-tags")
+        if lang:
+            buffer.set_language(lang)
+
     def setup_css(self):
         css_provider = Gtk.CssProvider()
         css_content = """
@@ -191,6 +242,7 @@ class ComfyWindow(Adw.ApplicationWindow):
             .view { border: none; border-radius: 8px; background-color: @view_bg_color; }
             .debug-text { font-family: monospace; font-size: 11px; opacity: 0.8; }
             separator { background-color: transparent; }
+            gutter { background-color: alpha(@view_fg_color, 0.05); border-right: 1px solid alpha(@view_fg_color, 0.1); }
         """
         css_provider.load_from_data(css_content, len(css_content))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(
@@ -243,14 +295,29 @@ class ComfyWindow(Adw.ApplicationWindow):
         return sc
 
     def create_scrolled_textview(self, buffer):
-        textview = Gtk.TextView(
-            buffer=buffer, wrap_mode=Gtk.WrapMode.WORD, vexpand=True)
+        textview = GtkSource.View()
+        textview.set_buffer(buffer)
+        textview.set_wrap_mode(Gtk.WrapMode.WORD)
+        textview.set_vexpand(True)
+        textview.set_show_line_numbers(True)
+        textview.set_highlight_current_line(False)
+        
+        # Set style scheme based on system dark/light mode
+        style_manager = GtkSource.StyleSchemeManager.get_default()
+        adw_style_manager = Adw.StyleManager.get_default()
+        if adw_style_manager.get_dark():
+            style_scheme = style_manager.get_scheme("Adwaita-dark")
+        else:
+            style_scheme = style_manager.get_scheme("Adwaita")
+        if style_scheme:
+            buffer.set_style_scheme(style_scheme)
         
         # Track completion state for this textview
         textview.completion_active = False
         textview.completion_debounce_id = None
         
         key_controller = Gtk.EventControllerKey()
+        key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key_controller.connect("key-pressed", lambda controller, keyval, keycode, state: self.on_textview_key_press(textview, keyval, keycode, state))
         textview.add_controller(key_controller)
         
@@ -483,13 +550,16 @@ class ComfyWindow(Adw.ApplicationWindow):
                             listbox.select_row(prev_row)
                 return True
             elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return):
-                # Complete with selected item
+                # Complete with selected item (or first item if none selected)
                 selected = listbox.get_selected_row()
+                if not selected:
+                    # Select first item if nothing is selected
+                    selected = listbox.get_row_at_index(0)
                 if selected:
                     tag = selected.get_child().get_label()
                     self.insert_completion(textview, tag)
                     self.completion_popup.popdown()
-                    return True
+                return True
         
         # Check for manual Tab completion (fallback)
         if keyval == Gdk.KEY_Tab and self.danbooru_tags:
