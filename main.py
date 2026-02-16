@@ -10,6 +10,7 @@ import csv
 import gi
 import tempfile
 import os
+import queue
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -100,6 +101,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.style_list = []
         self.workflow_data = None
         self.danbooru_tags = []
+        self.gen_queue = queue.Queue()
+        self.is_processing = False
 
         # Main Layout container
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -184,8 +187,14 @@ class ComfyWindow(Adw.ApplicationWindow):
         btn_box.append(self.stop_button)
         self.input_area.append(btn_box)
 
+        progress_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6
+        )
         self.progress_bar = Gtk.ProgressBar()
-        self.input_area.append(self.progress_bar)
+        progress_box.append(self.progress_bar)
+        self.queue_label = Gtk.Label(label="", xalign=0)
+        progress_box.append(self.queue_label)
+        self.input_area.append(progress_box)
 
         # Bottom section: Debug (Split vertically from inputs)
         self.debug_revealer = Gtk.Revealer(
@@ -690,6 +699,17 @@ class ComfyWindow(Adw.ApplicationWindow):
         except Exception as e:
             self.log(f"Error loading state: {e}")
 
+    def update_queue_label(self):
+        """
+        Update the queue status label.
+        """
+        queue_size = self.gen_queue.qsize()
+        if queue_size > 0:
+            text = f"Queue: {queue_size} item{'s' if queue_size != 1 else ''}"
+            GLib.idle_add(self.queue_label.set_text, text)
+        else:
+            GLib.idle_add(self.queue_label.set_text, "")
+
     def on_stop_clicked(self, _):
         try:
             requests.post(f"http://{SERVER_ADDRESS}/interrupt", timeout=5)
@@ -698,6 +718,9 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.log(f"Stop error: {e}")
 
     def on_generate_clicked(self, _):
+        """
+        Add a generation request to the queue.
+        """
         if not self.workflow_data:
             return
         if self.seed_mode_combo.get_selected() == 0:
@@ -707,13 +730,22 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         current_seed = int(self.seed_adj.get_value())
         pos = self.pos_buffer.get_text(
-            self.pos_buffer.get_start_iter(), self.pos_buffer.get_end_iter(), False)
+            self.pos_buffer.get_start_iter(),
+            self.pos_buffer.get_end_iter(), False
+        )
         neg = self.neg_buffer.get_text(
-            self.neg_buffer.get_start_iter(), self.neg_buffer.get_end_iter(), False)
+            self.neg_buffer.get_start_iter(),
+            self.neg_buffer.get_end_iter(), False
+        )
         sel_idx = self.style_dropdown.get_selected()
-        style = self.style_list[sel_idx] if self.style_list and sel_idx != Gtk.INVALID_LIST_POSITION else None
+        style = (
+            self.style_list[sel_idx]
+            if self.style_list and sel_idx != Gtk.INVALID_LIST_POSITION
+            else None
+        )
 
-        for node in self.workflow_data.values():
+        workflow_copy = json.loads(json.dumps(self.workflow_data))
+        for node in workflow_copy.values():
             if node.get("class_type") == PROMPT_NODE_CLASS:
                 node["inputs"].update({"positive": pos, "negative": neg})
                 if style:
@@ -721,16 +753,46 @@ class ComfyWindow(Adw.ApplicationWindow):
             elif node.get("class_type") == LOADER_NODE_CLASS:
                 node["inputs"]["seed"] = current_seed
 
-        self.gen_button.set_sensitive(False)
-        threading.Thread(target=self.generate_logic, daemon=True).start()
+        self.gen_queue.put(workflow_copy)
+        self.update_queue_label()
+        self.log(f"Added to queue (queue size: {self.gen_queue.qsize()})")
 
-    def generate_logic(self):
+        if not self.is_processing:
+            threading.Thread(
+                target=self.process_queue, daemon=True
+            ).start()
+
+    def process_queue(self):
+        """
+        Process generation requests from the queue.
+        """
+        self.is_processing = True
+
+        while not self.gen_queue.empty():
+            try:
+                workflow_data = self.gen_queue.get()
+                self.update_queue_label()
+                self.log("Processing queued item...")
+                self.generate_logic(workflow_data)
+                self.gen_queue.task_done()
+            except Exception as e:
+                self.log(f"Queue processing error: {e}")
+
+        self.is_processing = False
+        self.update_queue_label()
+        self.log("Queue processing complete")
+
+    def generate_logic(self, workflow_data):
+        """
+        Execute a single generation request.
+        """
         ws = websocket.WebSocket()
         try:
             ws.connect(f"ws://{SERVER_ADDRESS}/ws?clientId={CLIENT_ID}")
-            payload = {"prompt": self.workflow_data, "client_id": CLIENT_ID}
+            payload = {"prompt": workflow_data, "client_id": CLIENT_ID}
             resp = requests.post(
-                f"http://{SERVER_ADDRESS}/prompt", json=payload, timeout=10)
+                f"http://{SERVER_ADDRESS}/prompt", json=payload, timeout=10
+            )
             prompt_id = resp.json().get('prompt_id')
 
             while True:
@@ -754,20 +816,23 @@ class ComfyWindow(Adw.ApplicationWindow):
                     break
 
             hist_resp = requests.get(
-                f"http://{SERVER_ADDRESS}/history/{prompt_id}", timeout=10)
+                f"http://{SERVER_ADDRESS}/history/{prompt_id}", timeout=10
+            )
             history = hist_resp.json().get(prompt_id, {})
             for node_id, node_output in history.get('outputs', {}).items():
-                if self.workflow_data.get(node_id, {}).get("class_type") == SAVE_NODE_CLASS:
+                if workflow_data.get(node_id, {}).get(
+                    "class_type"
+                ) == SAVE_NODE_CLASS:
                     img = node_output['images'][0]
                     data = requests.get(
-                        f"http://{SERVER_ADDRESS}/view", params=img).content
+                        f"http://{SERVER_ADDRESS}/view", params=img
+                    ).content
                     GLib.idle_add(self.update_image, data)
                     break
         except Exception as e:
             self.log(f"Gen error: {e}")
         finally:
             ws.close()
-            GLib.idle_add(self.gen_button.set_sensitive, True)
             GLib.idle_add(self.progress_bar.set_fraction, 0.0)
 
     def update_image(self, data):
