@@ -127,20 +127,19 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.toast_overlay = Adw.ToastOverlay()
         self.main_box.append(self.toast_overlay)
 
-        # Horizontal Split: [ Sidebar (Left) | Preview (Right) ]
-        self.hpaned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        self.hpaned.set_shrink_start_child(False)
-        self.hpaned.set_shrink_end_child(False)
-        self.toast_overlay.set_child(self.hpaned)
+        # Horizontal layout: [ Sidebar (Left) | Preview (Right) ]
+        self.content_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL
+        )
+        self.toast_overlay.set_child(self.content_box)
 
         # --- Sidebar (Left Column) ---
         self.sidebar_vbox = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.sidebar_vbox.set_size_request(420, -1)
-        self.hpaned.set_start_child(self.sidebar_vbox)
-
-        # Lock preview panel to 50% width
-        self.connect("notify::default-width", self._on_width_changed)
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+            hexpand=True
+        )
+        self.content_box.append(self.sidebar_vbox)
 
         # Top section: Inputs
         self.input_area = Gtk.Box(
@@ -217,17 +216,36 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         # --- Preview (Right Column) ---
         self.preview_revealer = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.SLIDE_LEFT, reveal_child=True, hexpand=True)
-        self.hpaned.set_end_child(self.preview_revealer)
+            transition_type=Gtk.RevealerTransitionType.SLIDE_LEFT,
+            reveal_child=True,
+            hexpand=True
+        )
+        self.content_box.append(self.preview_revealer)
 
         preview_panel = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, css_classes=["preview-panel"])
-        preview_panel.set_size_request(500, -1)
-        self.picture = Gtk.Picture(
-            content_fit=Gtk.ContentFit.CONTAIN, vexpand=True)
+            orientation=Gtk.Orientation.VERTICAL,
+            css_classes=["preview-panel"]
+        )
+        
+        # ScrolledWindow that doesn't resize based on child
+        picture_scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.NEVER,
+            propagate_natural_width=False,
+            propagate_natural_height=False,
+            vexpand=True,
+            hexpand=True
+        )
         for side in ["top", "bottom", "start", "end"]:
-            getattr(self.picture, f"set_margin_{side}")(20)
-        preview_panel.append(self.picture)
+            getattr(picture_scroll, f"set_margin_{side}")(20)
+        
+        self.picture = Gtk.Picture(
+            content_fit=Gtk.ContentFit.CONTAIN,
+            can_shrink=True
+        )
+        picture_scroll.set_child(self.picture)
+        preview_panel.append(picture_scroll)
+        self.preview_revealer.set_child(preview_panel)
         self.preview_revealer.set_child(preview_panel)
 
         self.setup_keybinds()
@@ -287,11 +305,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         css_provider.load_from_data(css_content, len(css_content))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(
         ), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-
-    def _on_width_changed(self, *args):
-        width = self.get_default_size().width
-        if width > 0:
-            self.hpaned.set_position(width // 2)
 
     def log(self, text):
         GLib.idle_add(self._log_idle, text)
@@ -371,7 +384,19 @@ class ComfyWindow(Adw.ApplicationWindow):
         return scrolled, textview
 
     def on_toggle_preview(self, btn):
-        self.preview_revealer.set_reveal_child(btn.get_active())
+        """
+        Toggle preview panel visibility.
+        """
+        is_active = btn.get_active()
+        
+        if is_active:
+            # Show: enable expansion then reveal
+            self.preview_revealer.set_hexpand(True)
+            self.preview_revealer.set_reveal_child(True)
+        else:
+            # Hide: disable expansion then collapse
+            self.preview_revealer.set_hexpand(False)
+            self.preview_revealer.set_reveal_child(False)
 
     def on_toggle_debug(self, btn):
         self.debug_revealer.set_reveal_child(btn.get_active())
