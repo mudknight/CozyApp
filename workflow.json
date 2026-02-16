@@ -1,0 +1,228 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "Illustrious/prefectIllustriousXL_v3.safetensors",
+      "stop_at_clip_layer": -2,
+      "seed": 772069920368728,
+      "lora_stack": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "LoaderFullPipe",
+    "_meta": {
+      "title": "Loader (full-pipe)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "sampler_name": "euler_ancestral_cfg_pp",
+      "scheduler": "karras",
+      "steps": 20,
+      "cfg": 1.5,
+      "denoise": 1,
+      "resolution": "832x1216 (2:3)",
+      "portrait": true,
+      "full_pipe": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "BaseNode",
+    "_meta": {
+      "title": "Base (full-pipe)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "sampler_name": "euler_ancestral",
+      "scheduler": "align_your_steps",
+      "steps": 18,
+      "cfg": 2.5,
+      "denoise": 0.2,
+      "upscale_model": "4x-UltraSharpV2_Lite.pth",
+      "scale_by": 2,
+      "full_pipe": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "UpscaleNode",
+    "_meta": {
+      "title": "Upscale (full-pipe)"
+    }
+  },
+  "12": {
+    "inputs": {
+      "text": "",
+      "loras": {
+        "__value__": []
+      }
+    },
+    "class_type": "Lora Stacker (LoraManager)",
+    "_meta": {
+      "title": "Lora Stacker (LoraManager)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "group_mode": true,
+      "default_active": false,
+      "allow_strength_adjustment": false,
+      "toggle_trigger_words": {
+        "__value__": []
+      },
+      "orinalMessage": "",
+      "trigger_words": [
+        "12",
+        1
+      ]
+    },
+    "class_type": "TriggerWord Toggle (LoraManager)",
+    "_meta": {
+      "title": "TriggerWord Toggle (LoraManager)"
+    }
+  },
+  "27": {
+    "inputs": {
+      "filename_prefix": "%time_%seed",
+      "path": "%date",
+      "extension": "png",
+      "a1111_metadata": true,
+      "comfyui_workflow": true,
+      "full_pipe": [
+        "200",
+        0
+      ]
+    },
+    "class_type": "SaveFullPipe",
+    "_meta": {
+      "title": "Save (Full Pipe)"
+    }
+  },
+  "87": {
+    "inputs": {
+      "style": "",
+      "quality_tags": false,
+      "embeddings": false,
+      "character_presets": true,
+      "mode": "concatenate",
+      "positive": "",
+      "negative": "",
+      "deduplicate_tags": true,
+      "full_pipe": [
+        "1",
+        0
+      ],
+      "trigger_words": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "PromptConditioningNode",
+    "_meta": {
+      "title": "Prompt (full-pipe)"
+    }
+  },
+  "200": {
+    "inputs": {
+      "device": "GPU",
+      "sigma_r": 0.01,
+      "sigma_color": 8,
+      "full_pipe": [
+        "207:206",
+        0
+      ]
+    },
+    "class_type": "OpenCVDenoise",
+    "_meta": {
+      "title": "OpenCV Denoise"
+    }
+  },
+  "202": {
+    "inputs": {
+      "bbox_model": "bbox/face_yolov8m.pt",
+      "fallback_model": "none",
+      "threshold": 0.5,
+      "steps": 20,
+      "cfg": 1.5,
+      "sampler": "euler_ancestral_cfg_pp",
+      "scheduler": "align_your_steps",
+      "denoise": 0.2,
+      "upscale_method": "lanczos",
+      "upscale_model": "none",
+      "feather": 0.1,
+      "context_padding": 0.1,
+      "full_pipe": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "DetailerPipeNode",
+    "_meta": {
+      "title": "FastDetailer (full-pipe)"
+    }
+  },
+  "207:185": {
+    "inputs": {
+      "face_model": "bbox/face_yolov8m.pt",
+      "eyes_pair_model": "bbox/full_eyes_detect_v1.pt",
+      "eye_single_model": "bbox/Eyes.pt",
+      "threshold": 0.5,
+      "cfg": 2.5,
+      "sampler": "euler_ancestral",
+      "scheduler": "align_your_steps",
+      "face_steps": 20,
+      "face_denoise": 0.3,
+      "face_scale": 1.5,
+      "eye_steps": 20,
+      "eye_denoise": 0.2,
+      "eye_scale": 1.5,
+      "upscale_method": "lanczos",
+      "max_megapixels": 2,
+      "feather": 0.2,
+      "context_padding": 0.1,
+      "full_pipe": [
+        "207:15",
+        0
+      ]
+    },
+    "class_type": "NestedDetailerPipeNode",
+    "_meta": {
+      "title": "Nested Detailer (full-pipe)"
+    }
+  },
+  "207:206": {
+    "inputs": {
+      "cond": false,
+      "tt_value": [
+        "207:185",
+        0
+      ],
+      "ff_value": [
+        "202",
+        0
+      ]
+    },
+    "class_type": "ImpactConditionalBranch",
+    "_meta": {
+      "title": "ImpactConditionalBranch"
+    }
+  },
+  "207:15": {
+    "inputs": {
+      "lora_name": "Illustrious/character/Nekopara_Vanilla_IlluXL.safetensors",
+      "strength_model": 0.8,
+      "strength_clip": 0,
+      "substring": "vanilla \\(nekopara\\)",
+      "full_pipe": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "ConditionalLoraFullPipe",
+    "_meta": {
+      "title": "Conditional Lora (full-pipe)"
+    }
+  }
+}

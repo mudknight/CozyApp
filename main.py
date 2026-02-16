@@ -22,19 +22,37 @@ SAVE_NODE_CLASS = "SaveFullPipe"
 
 class ComfyApp(Adw.Application):
     def __init__(self, **kwargs):
-        super().__init__(application_id="com.example.comfy_gen", **kwargs)
+        super().__init__(application_id="com.example.comfy_gen",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE, **kwargs)
         self.connect('activate', self.on_activate)
+        self.workflow_file = None
+
+    def do_command_line(self, command_line):
+        args = command_line.get_arguments()
+        # Default workflow file
+        self.workflow_file = "workflow.json"
+        # Parse arguments for -w flag
+        i = 1
+        while i < len(args):
+            if args[i] == "-w" and i + 1 < len(args):
+                self.workflow_file = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        self.activate()
+        return 0
 
     def on_activate(self, app):
-        self.win = ComfyWindow(application=app)
+        self.win = ComfyWindow(application=app, workflow_file=self.workflow_file)
         self.win.present()
 
 
 class ComfyWindow(Adw.ApplicationWindow):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, workflow_file=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.set_title("ComfyUI Prompt Editor")
         self.set_default_size(1200, 900)
+        self.workflow_file = workflow_file
 
         self.setup_css()
         self.style_list = []
@@ -83,10 +101,6 @@ class ComfyWindow(Adw.ApplicationWindow):
             getattr(self.input_area, f"set_margin_{m}")(20)
         self.input_area.set_margin_bottom(10)
         self.sidebar_vbox.append(self.input_area)
-
-        self.file_button = Gtk.Button(label="Load API JSON")
-        self.file_button.connect("clicked", self.on_open_file)
-        self.input_area.append(self.file_button)
 
         self.input_area.append(Gtk.Label(label="Style", xalign=0))
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
@@ -162,6 +176,9 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.fetch_node_info()
 
+        if self.workflow_file:
+            self.load_workflow_file(self.workflow_file)
+
     def setup_css(self):
         css_provider = Gtk.CssProvider()
         css_content = """
@@ -226,19 +243,14 @@ class ComfyWindow(Adw.ApplicationWindow):
     def on_toggle_debug(self, btn):
         self.debug_revealer.set_reveal_child(btn.get_active())
 
-    def on_open_file(self, _):
-        dialog = Gtk.FileDialog.new()
-        dialog.open(self, None, self.on_file_dialog_response)
-
-    def on_file_dialog_response(self, dialog, result):
+    def load_workflow_file(self, filepath):
         try:
-            file = dialog.open_finish(result)
-            if file:
-                with open(file.get_path(), 'r', encoding='utf-8') as f:
-                    self.workflow_data = json.load(f)
-                self.sync_ui_from_json()
+            with open(filepath, 'r', encoding='utf-8') as f:
+                self.workflow_data = json.load(f)
+            self.sync_ui_from_json()
+            self.log(f"Loaded workflow: {filepath}")
         except Exception as e:
-            self.log(str(e))
+            self.log(f"Error loading file: {e}")
 
     def sync_ui_from_json(self):
         if not self.workflow_data:
