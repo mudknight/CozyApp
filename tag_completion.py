@@ -31,6 +31,9 @@ class TagCompletion:
         self.tag_aliases = {}  # alias -> original_tag
         self.sorted_tags = []
         self.completion_popup = None
+        self.listbox = None
+        self.scrolled = None
+        self.current_textview = None
         self.log = log_callback if log_callback else lambda x: None
 
     def load_tags(self, filepath='danbooru.csv'):
@@ -123,28 +126,58 @@ class TagCompletion:
 
         return matches[:10]
 
-    def show_popup(self, textview, suggestions):
+    def _create_popup(self, textview):
         """
-        Show completion popup with suggestions.
+        Create the completion popup structure once.
 
         Args:
             textview: GtkSourceView to attach popup to
-            suggestions: List of tag suggestions to display
         """
-        if not suggestions:
-            return
-
-        if self.completion_popup:
-            self.completion_popup.popdown()
+        self.current_textview = textview
 
         popover = Gtk.Popover()
         popover.set_parent(textview)
         popover.set_position(Gtk.PositionType.BOTTOM)
         popover.set_autohide(False)
 
-        listbox = Gtk.ListBox()
-        listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.listbox = Gtk.ListBox()
+        self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
 
+        def on_row_activated(listbox, row):
+            tag_label = row.get_child().get_first_child()
+            if tag_label:
+                tag = tag_label.get_label()
+                self.insert_completion(textview, tag)
+            popover.popdown()
+
+        self.listbox.connect("row-activated", on_row_activated)
+
+        self.scrolled = Gtk.ScrolledWindow()
+        self.scrolled.set_child(self.listbox)
+        self.scrolled.set_max_content_height(300)
+        self.scrolled.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
+        )
+
+        popover.set_child(self.scrolled)
+
+        self.completion_popup = popover
+
+    def _populate_listbox(self, suggestions):
+        """
+        Populate the listbox with tag suggestions.
+
+        Args:
+            suggestions: List of tag suggestions to display
+        """
+        # Clear existing rows
+        while True:
+            row = self.listbox.get_row_at_index(0)
+            if row is None:
+                break
+            self.listbox.remove(row)
+
+        # Add new suggestions
         for i, tag in enumerate(suggestions):
             row = Gtk.ListBoxRow()
 
@@ -193,20 +226,19 @@ class TagCompletion:
             hbox.append(cat_box)
 
             row.set_child(hbox)
-            listbox.append(row)
+            self.listbox.append(row)
+
+            # Select first row
             if i == 0:
-                listbox.select_row(row)
+                self.listbox.select_row(row)
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_child(listbox)
-        scrolled.set_max_content_height(300)
-        scrolled.set_policy(
-            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
-        )
-        scrolled.set_size_request(400, min(len(suggestions) * 40, 300))
+    def _position_popup(self, textview):
+        """
+        Position the popup at the cursor location.
 
-        popover.set_child(scrolled)
-
+        Args:
+            textview: GtkSourceView to position relative to
+        """
         buffer = textview.get_buffer()
         cursor = buffer.get_insert()
         iter_cursor = buffer.get_iter_at_mark(cursor)
@@ -218,17 +250,39 @@ class TagCompletion:
         rect.width = 1
         rect.height = 1
 
-        popover.set_pointing_to(rect)
+        self.completion_popup.set_pointing_to(rect)
 
-        def on_row_activated(listbox, row):
-            tag = suggestions[row.get_index()]
-            self.insert_completion(textview, tag)
-            popover.popdown()
+    def show_popup(self, textview, suggestions):
+        """
+        Show completion popup with suggestions.
 
-        listbox.connect("row-activated", on_row_activated)
+        Args:
+            textview: GtkSourceView to attach popup to
+            suggestions: List of tag suggestions to display
+        """
+        if not suggestions:
+            return
 
-        self.completion_popup = popover
-        popover.popup()
+        # Create popup if it doesn't exist or textview changed
+        if (not self.completion_popup or
+                self.current_textview != textview):
+            if self.completion_popup:
+                self.completion_popup.unparent()
+            self._create_popup(textview)
+
+        # Populate with new suggestions
+        self._populate_listbox(suggestions)
+
+        # Update scrolled window size
+        self.scrolled.set_size_request(
+            400, min(len(suggestions) * 40, 300)
+        )
+
+        # Position and show
+        self._position_popup(textview)
+
+        if not self.completion_popup.is_visible():
+            self.completion_popup.popup()
 
     def insert_completion(self, textview, tag):
         """
@@ -322,43 +376,37 @@ class TagCompletion:
                     return True
             return False
 
-        scrolled = self.completion_popup.get_child()
-        listbox = (
-            scrolled.get_child().get_child()
-            if scrolled.get_child() else None
-        )
-
-        if not listbox:
+        if not self.listbox:
             return False
 
         if keyval == Gdk.KEY_Escape:
             self.completion_popup.popdown()
             return True
         elif keyval == Gdk.KEY_Down:
-            selected = listbox.get_selected_row()
+            selected = self.listbox.get_selected_row()
             if selected:
                 index = selected.get_index()
-                next_row = listbox.get_row_at_index(index + 1)
+                next_row = self.listbox.get_row_at_index(index + 1)
                 if next_row:
-                    listbox.select_row(next_row)
+                    self.listbox.select_row(next_row)
             else:
-                first_row = listbox.get_row_at_index(0)
+                first_row = self.listbox.get_row_at_index(0)
                 if first_row:
-                    listbox.select_row(first_row)
+                    self.listbox.select_row(first_row)
             return True
         elif keyval == Gdk.KEY_Up:
-            selected = listbox.get_selected_row()
+            selected = self.listbox.get_selected_row()
             if selected:
                 index = selected.get_index()
                 if index > 0:
-                    prev_row = listbox.get_row_at_index(index - 1)
+                    prev_row = self.listbox.get_row_at_index(index - 1)
                     if prev_row:
-                        listbox.select_row(prev_row)
+                        self.listbox.select_row(prev_row)
             return True
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return):
-            selected = listbox.get_selected_row()
+            selected = self.listbox.get_selected_row()
             if not selected:
-                selected = listbox.get_row_at_index(0)
+                selected = self.listbox.get_row_at_index(0)
             if selected:
                 # Extract tag from the hbox structure
                 hbox = selected.get_child()
