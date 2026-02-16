@@ -316,6 +316,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.setup_keybinds()
 
         self.tag_completion.load_tags()
+        self.tag_completion.load_characters()
 
         self.fetch_node_info()
 
