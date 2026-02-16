@@ -62,14 +62,19 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.main_box.append(self.toast_overlay)
 
         # Horizontal Split: [ Sidebar (Left) | Preview (Right) ]
-        self.hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.toast_overlay.set_child(self.hbox)
+        self.hpaned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.hpaned.set_shrink_start_child(False)
+        self.hpaned.set_shrink_end_child(False)
+        self.toast_overlay.set_child(self.hpaned)
 
         # --- Sidebar (Left Column) ---
         self.sidebar_vbox = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.sidebar_vbox.set_size_request(420, -1)
-        self.hbox.append(self.sidebar_vbox)
+        self.hpaned.set_start_child(self.sidebar_vbox)
+
+        # Lock preview panel to 50% width
+        self.connect("notify::default-width", self._on_width_changed)
 
         # Top section: Inputs
         self.input_area = Gtk.Box(
@@ -142,8 +147,8 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         # --- Preview (Right Column) ---
         self.preview_revealer = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.SLIDE_LEFT, reveal_child=True, hexpand=False)
-        self.hbox.append(self.preview_revealer)
+            transition_type=Gtk.RevealerTransitionType.SLIDE_LEFT, reveal_child=True, hexpand=True)
+        self.hpaned.set_end_child(self.preview_revealer)
 
         preview_panel = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, css_classes=["preview-panel"])
@@ -169,6 +174,11 @@ class ComfyWindow(Adw.ApplicationWindow):
         css_provider.load_from_data(css_content, len(css_content))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(
         ), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def _on_width_changed(self, *args):
+        width = self.get_default_size().width
+        if width > 0:
+            self.hpaned.set_position(width // 2)
 
     def log(self, text):
         GLib.idle_add(self._log_idle, text)
