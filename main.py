@@ -202,8 +202,15 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.stop_button = Gtk.Button(
             label="Stop", css_classes=["destructive-action"])
         self.stop_button.connect("clicked", self.on_stop_clicked)
+        
+        # Queue label styled like a button
+        self.queue_label = Gtk.Label(
+            label="Queue: 0", xalign=0.5, css_classes=["queue-badge"]
+        )
+        
         btn_box.append(self.gen_button)
         btn_box.append(self.stop_button)
+        btn_box.append(self.queue_label)
         self.input_area.append(btn_box)
 
         progress_box = Gtk.Box(
@@ -211,8 +218,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         self.progress_bar = Gtk.ProgressBar()
         progress_box.append(self.progress_bar)
-        self.queue_label = Gtk.Label(label="", xalign=0)
-        progress_box.append(self.queue_label)
         self.input_area.append(progress_box)
 
         # Bottom section: Debug (Split vertically from inputs)
@@ -552,6 +557,16 @@ class ComfyWindow(Adw.ApplicationWindow):
                 border-radius: 8px;
                 background-color: @window_bg_color;
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            }
+            .queue-badge {
+                padding: 6px 12px;
+                border-radius: 6px;
+                background-color: alpha(@view_fg_color, 0.1);
+                border: 1px solid alpha(@view_fg_color, 0.15);
+                color: @view_fg_color;
+                opacity: 0.7;
+                font-weight: bold;
+                min-width: 60px;
             }
         """
         css_provider.load_from_data(css_content, len(css_content))
@@ -952,11 +967,10 @@ class ComfyWindow(Adw.ApplicationWindow):
         Update the queue status label.
         """
         queue_size = self.gen_queue.qsize()
-        if queue_size > 0:
-            text = f"Queue: {queue_size} item{'s' if queue_size != 1 else ''}"
-            GLib.idle_add(self.queue_label.set_text, text)
-        else:
-            GLib.idle_add(self.queue_label.set_text, "")
+        # Include currently processing image in count
+        total_count = queue_size + (1 if self.is_processing else 0)
+        text = f"Queue: {total_count}"
+        GLib.idle_add(self.queue_label.set_text, text)
 
     def on_stop_clicked(self, _):
         try:
