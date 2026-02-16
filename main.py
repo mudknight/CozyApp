@@ -68,9 +68,18 @@ class ComfyApp(Adw.Application):
         super().__init__(application_id="com.example.comfy_gen",
                          flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE, **kwargs)
         self.connect('activate', self.on_activate)
+        self.connect('shutdown', self.on_shutdown)
         self.workflow_file = None
-        # Set up language manager early, before any GtkSource views are created
+        # Set up language manager early, before views are created
         self._lang_file = setup_language_manager()
+
+    def on_shutdown(self, app):
+        """Clean up temporary language file on shutdown."""
+        if self._lang_file and os.path.exists(self._lang_file):
+            try:
+                os.unlink(self._lang_file)
+            except Exception:
+                pass
 
     def do_command_line(self, command_line):
         args = command_line.get_arguments()
@@ -105,6 +114,10 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.tag_completion = TagCompletion(self.log)
         self.gen_queue = queue.Queue()
         self.is_processing = False
+        self.debounce_timers = []
+
+        # Connect to destroy signal for cleanup
+        self.connect("close-request", self.on_close_request)
 
         # Main Layout container
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -257,6 +270,17 @@ class ComfyWindow(Adw.ApplicationWindow):
         if self.workflow_file:
             self.load_workflow_file(self.workflow_file)
 
+    def on_close_request(self, window):
+        """Clean up resources before closing."""
+        # Remove all debounce timers
+        for timer_id in self.debounce_timers:
+            try:
+                GLib.source_remove(timer_id)
+            except Exception:
+                pass
+        self.debounce_timers.clear()
+        return False
+
     def setup_keybinds(self):
         """
         Set up global keyboard shortcuts for the window.
@@ -317,7 +341,10 @@ class ComfyWindow(Adw.ApplicationWindow):
     def fetch_node_info(self):
         def worker():
             try:
-                url = f"http://{SERVER_ADDRESS}/object_info/{PROMPT_NODE_CLASS}"
+                url = (
+                    f"http://{SERVER_ADDRESS}/object_info/"
+                    f"{PROMPT_NODE_CLASS}"
+                )
                 resp = requests.get(url, timeout=3)
                 if resp.status_code == 200:
                     data = resp.json().get(PROMPT_NODE_CLASS, {})
@@ -326,11 +353,14 @@ class ComfyWindow(Adw.ApplicationWindow):
                     for cat in ["required", "optional"]:
                         if "style" in inputs.get(cat, {}):
                             entry = inputs[cat]["style"]
-                            styles = entry[0] if isinstance(
-                                entry, list) and isinstance(entry[0], list) else entry
+                            styles = (
+                                entry[0] if isinstance(entry, list)
+                                and isinstance(entry[0], list) else entry
+                            )
                             break
                     if styles:
                         GLib.idle_add(self.update_style_dropdown, styles)
+                resp.close()
             except Exception as e:
                 self.log(f"Metadata fail: {e}")
         threading.Thread(target=worker, daemon=True).start()
@@ -410,18 +440,30 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         if textview.completion_debounce_id:
             GLib.source_remove(textview.completion_debounce_id)
+            try:
+                self.debounce_timers.remove(textview.completion_debounce_id)
+            except ValueError:
+                pass
             textview.completion_debounce_id = None
 
-        textview.completion_debounce_id = GLib.timeout_add(
+        timer_id = GLib.timeout_add(
             150,
             lambda: self._show_completion_if_needed(textview)
         )
+        textview.completion_debounce_id = timer_id
+        self.debounce_timers.append(timer_id)
 
     def _show_completion_if_needed(self, textview):
         """
         Check if we should show completion and show it.
         """
-        textview.completion_debounce_id = None
+        # Remove timer from tracking list
+        if hasattr(textview, 'completion_debounce_id'):
+            try:
+                self.debounce_timers.remove(textview.completion_debounce_id)
+            except ValueError:
+                pass
+            textview.completion_debounce_id = None
 
         buffer = textview.get_buffer()
         cursor = buffer.get_insert()
@@ -575,46 +617,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         buffer.delete(iter_start_with_space, iter_end)
         buffer.insert(iter_start_with_space, leading_space + new_tag)
 
-    def on_textview_changed(self, textview):
-        """Handle text changes with debounce for auto-completion"""
-        # Cancel existing debounce timer
-        if textview.completion_debounce_id:
-            GLib.source_remove(textview.completion_debounce_id)
-            textview.completion_debounce_id = None
-        
-        # Set up new debounce timer (150ms)
-        textview.completion_debounce_id = GLib.timeout_add(150, lambda: self._show_completion_if_needed(textview))
-    
-    def _show_completion_if_needed(self, textview):
-        """
-        Check if we should show completion and show it.
-        """
-        textview.completion_debounce_id = None
-
-        buffer = textview.get_buffer()
-        cursor = buffer.get_insert()
-        iter_cursor = buffer.get_iter_at_mark(cursor)
-
-        if not self.tag_completion.should_show_completion(
-            buffer, iter_cursor
-        ):
-            self.tag_completion.close_popup()
-            return False
-
-        text = buffer.get_text(
-            buffer.get_start_iter(),
-            buffer.get_end_iter(),
-            False
-        )
-        suggestions = self.tag_completion.get_completions(text)
-
-        if suggestions:
-            self.tag_completion.show_popup(textview, suggestions)
-        else:
-            self.tag_completion.close_popup()
-
-        return False
-    
     def on_textview_key_press(self, textview, keyval, keycode, state):
         # Handle global keybinds first
         ctrl = state & Gdk.ModifierType.CONTROL_MASK
@@ -809,9 +811,12 @@ class ComfyWindow(Adw.ApplicationWindow):
             ws.connect(f"ws://{SERVER_ADDRESS}/ws?clientId={CLIENT_ID}")
             payload = {"prompt": workflow_data, "client_id": CLIENT_ID}
             resp = requests.post(
-                f"http://{SERVER_ADDRESS}/prompt", json=payload, timeout=10
+                f"http://{SERVER_ADDRESS}/prompt",
+                json=payload,
+                timeout=10
             )
             prompt_id = resp.json().get('prompt_id')
+            resp.close()
 
             while True:
                 out = ws.recv()
@@ -824,33 +829,46 @@ class ComfyWindow(Adw.ApplicationWindow):
                     val = msg['data']['value'] / msg['data']['max']
                     GLib.idle_add(self.progress_bar.set_fraction, val)
 
-                if msg['type'] == 'executed' and 'images' in msg['data']['output']:
-                    img = msg['data']['output']['images'][0]
-                    img_data = requests.get(
-                        f"http://{SERVER_ADDRESS}/view", params=img).content
-                    GLib.idle_add(self.update_image, img_data)
+                if msg['type'] == 'executed':
+                    if 'images' in msg['data']['output']:
+                        img = msg['data']['output']['images'][0]
+                        img_resp = requests.get(
+                            f"http://{SERVER_ADDRESS}/view", params=img
+                        )
+                        img_data = img_resp.content
+                        img_resp.close()
+                        GLib.idle_add(self.update_image, img_data)
 
-                if msg['type'] == 'executing' and msg['data']['node'] is None:
-                    break
+                if msg['type'] == 'executing':
+                    if msg['data']['node'] is None:
+                        break
 
             hist_resp = requests.get(
-                f"http://{SERVER_ADDRESS}/history/{prompt_id}", timeout=10
+                f"http://{SERVER_ADDRESS}/history/{prompt_id}",
+                timeout=10
             )
             history = hist_resp.json().get(prompt_id, {})
+            hist_resp.close()
+
             for node_id, node_output in history.get('outputs', {}).items():
                 if workflow_data.get(node_id, {}).get(
                     "class_type"
                 ) == SAVE_NODE_CLASS:
                     img = node_output['images'][0]
-                    data = requests.get(
+                    data_resp = requests.get(
                         f"http://{SERVER_ADDRESS}/view", params=img
-                    ).content
+                    )
+                    data = data_resp.content
+                    data_resp.close()
                     GLib.idle_add(self.update_image, data)
                     break
         except Exception as e:
             self.log(f"Gen error: {e}")
         finally:
-            ws.close()
+            try:
+                ws.close()
+            except Exception:
+                pass
             GLib.idle_add(self.progress_bar.set_fraction, 0.0)
 
     def update_image(self, data):
@@ -861,8 +879,11 @@ class ComfyWindow(Adw.ApplicationWindow):
             pix = loader.get_pixbuf()
             if pix:
                 self.picture.set_paintable(Gdk.Texture.new_for_pixbuf(pix))
-        except:
-            pass
+        except Exception:
+            try:
+                loader.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
