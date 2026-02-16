@@ -317,6 +317,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.tag_completion.load_tags()
         self.tag_completion.load_characters()
+        self.tag_completion.load_loras()
 
         self.fetch_node_info()
 

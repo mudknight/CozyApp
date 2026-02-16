@@ -34,6 +34,7 @@ class TagCompletion:
         self.tag_aliases = {}  # alias -> original_tag
         self.sorted_tags = []
         self.characters = []  # character names from API
+        self.loras = []  # LoRA names from API
         self.completion_popup = None
         self.listbox = None
         self.scrolled = None
@@ -107,6 +108,74 @@ class TagCompletion:
         except Exception as e:
             self.log(f"Error loading characters: {e}")
 
+    def load_loras(
+        self,
+        url='http://localhost:8188/object_info/LoraLoader'
+    ):
+        """
+        Load LoRA names from API endpoint.
+
+        Args:
+            url: API endpoint URL
+        """
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                response_data = response.read().decode('utf-8')
+
+                # Check if response is empty
+                if not response_data.strip():
+                    self.log(
+                        f"Empty response from {url}. "
+                        f"LoRA autocomplete disabled."
+                    )
+                    return
+
+                data = json.loads(response_data)
+
+                # Extract LoRA list from object_info response
+                # Format: {"LoraLoader": {"input": {"required":
+                # {"lora_name": [["lora1.safetensors", ...]]}}}
+                lora_list = None
+                if isinstance(data, dict) and 'LoraLoader' in data:
+                    node_data = data['LoraLoader']
+                    inputs = node_data.get('input', {})
+                    for cat in ['required', 'optional']:
+                        if 'lora_name' in inputs.get(cat, {}):
+                            entry = inputs[cat]['lora_name']
+                            lora_list = (
+                                entry[0] if isinstance(entry, list)
+                                and isinstance(entry[0], list)
+                                else entry
+                            )
+                            break
+
+                if lora_list:
+                    # Remove file extensions if present
+                    self.loras = sorted([
+                        lora.rsplit('.', 1)[0] if '.' in lora else lora
+                        for lora in lora_list
+                    ])
+                    self.log(
+                        f"Loaded {len(self.loras)} LoRAs from {url}"
+                    )
+                else:
+                    self.log(
+                        f"Could not find LoRA list in response. "
+                        f"LoRA autocomplete disabled."
+                    )
+        except urllib.error.URLError as e:
+            self.log(
+                f"Could not load LoRAs from {url}: {e}. "
+                f"LoRA autocomplete disabled."
+            )
+        except json.JSONDecodeError as e:
+            self.log(
+                f"Invalid JSON from {url}: {e}. "
+                f"LoRA autocomplete disabled."
+            )
+        except Exception as e:
+            self.log(f"Error loading LoRAs: {e}")
+
     def get_completions(self, text):
         """
         Get tag completions for the current text.
@@ -125,13 +194,28 @@ class TagCompletion:
         if len(current) < 2:
             return []
 
-        # Check if we're completing a character
+        # Check if we're completing a character or LoRA
         if ':' in current:
+            # Handle LoRA completion: <lora:name
+            if '<lora:' in current.lower():
+                # Extract search term after <lora:
+                lora_start = current.lower().rfind('<lora:')
+                search = current[lora_start + 6:].strip().lower()
+
+                if not search:
+                    # Return all LoRAs if nothing typed yet
+                    return self.loras[:10]
+                matches = [
+                    lora for lora in self.loras
+                    if lora.lower().startswith(search)
+                ]
+                return matches[:10]
+
+            # Handle character completion: character:name
             prefix, search = current.rsplit(':', 1)
             prefix = prefix.strip().lower()
             search = search.strip().lower()
 
-            # Character completion
             if prefix == 'character':
                 if not search:
                     # Return all characters if nothing typed yet
@@ -246,7 +330,7 @@ class TagCompletion:
             tag_label.set_hexpand(True)
             hbox.append(tag_label)
 
-            # Check if this is a character or a regular tag
+            # Check if this is a character, LoRA, or regular tag
             if tag in self.tag_data:
                 # Get tag data for regular tags
                 category, usage = self.tag_data.get(tag, (0, 0))
@@ -279,8 +363,17 @@ class TagCompletion:
                 cat_box.append(usage_label)
 
                 hbox.append(cat_box)
+            elif tag in self.loras:
+                # For LoRAs, add a badge
+                lora_badge = Gtk.Label()
+                lora_badge.set_markup(
+                    '<span background="#FF6B6B" '
+                    'foreground="white" weight="bold"> '
+                    'LORA </span>'
+                )
+                hbox.append(lora_badge)
             else:
-                # For characters, add a simple badge
+                # For characters, add a badge
                 char_badge = Gtk.Label()
                 char_badge.set_markup(
                     '<span background="#50C878" '
@@ -374,11 +467,15 @@ class TagCompletion:
         while iter_start.get_char() in ' \t':
             iter_start.forward_char()
 
-        # Get the text being replaced to check for character: prefix
+        # Get the text being replaced to check for special prefixes
         replaced_text = buffer.get_text(iter_start, iter_cursor, False)
         is_character = 'character:' in replaced_text.lower()
+        is_lora = '<lora:' in replaced_text.lower()
 
-        if is_character:
+        if is_lora:
+            # For LoRAs, insert full syntax with default weight
+            formatted_tag = f"<lora:{tag}:1.0>"
+        elif is_character:
             # For characters, keep as-is and preserve the prefix
             formatted_tag = f"character:{tag}"
         else:
