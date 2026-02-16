@@ -3,6 +3,9 @@
 
 from gi.repository import Gtk, Gdk, Pango
 import csv
+import json
+import urllib.request
+import urllib.error
 
 
 class TagCompletion:
@@ -30,6 +33,7 @@ class TagCompletion:
         self.tag_data = {}  # tag -> (category, usage)
         self.tag_aliases = {}  # alias -> original_tag
         self.sorted_tags = []
+        self.characters = []  # character names from API
         self.completion_popup = None
         self.listbox = None
         self.scrolled = None
@@ -80,6 +84,29 @@ class TagCompletion:
         except Exception as e:
             self.log(f"Could not load {filepath}: {e}")
 
+    def load_characters(self, url='http://localhost:8188/character_editor'):
+        """
+        Load character names from API endpoint.
+
+        Args:
+            url: API endpoint URL
+        """
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if isinstance(data, dict):
+                    self.characters = sorted(list(data.keys()))
+                    self.log(
+                        f"Loaded {len(self.characters)} characters "
+                        f"from {url}"
+                    )
+                else:
+                    self.log(f"Unexpected data format from {url}")
+        except urllib.error.URLError as e:
+            self.log(f"Could not load characters from {url}: {e}")
+        except Exception as e:
+            self.log(f"Error loading characters: {e}")
+
     def get_completions(self, text):
         """
         Get tag completions for the current text.
@@ -94,9 +121,28 @@ class TagCompletion:
         tags = text.split(',')
         if not tags:
             return []
-        current = tags[-1].strip().lower()
+        current = tags[-1].strip()
         if len(current) < 2:
             return []
+
+        # Check if we're completing a character
+        if ':' in current:
+            prefix, search = current.rsplit(':', 1)
+            prefix = prefix.strip().lower()
+            search = search.strip().lower()
+
+            # Character completion
+            if prefix == 'character':
+                if not search:
+                    # Return all characters if nothing typed yet
+                    return self.characters[:10]
+                matches = [
+                    char for char in self.characters
+                    if char.lower().startswith(search)
+                ]
+                return matches[:10]
+
+        current = current.lower()
 
         # Normalize search term: spaces -> underscores,
         # escaped parens -> normal parens
@@ -187,12 +233,6 @@ class TagCompletion:
         for i, tag in enumerate(suggestions):
             row = Gtk.ListBoxRow()
 
-            # Get tag data
-            category, usage = self.tag_data.get(tag, (0, 0))
-            color, cat_name = self.CATEGORY_COLORS.get(
-                category, ('#CCCCCC', 'Unknown')
-            )
-
             # Create horizontal box for tag display
             hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
@@ -206,30 +246,48 @@ class TagCompletion:
             tag_label.set_hexpand(True)
             hbox.append(tag_label)
 
-            # Category box
-            cat_box = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=4
-            )
+            # Check if this is a character or a regular tag
+            if tag in self.tag_data:
+                # Get tag data for regular tags
+                category, usage = self.tag_data.get(tag, (0, 0))
+                color, cat_name = self.CATEGORY_COLORS.get(
+                    category, ('#CCCCCC', 'Unknown')
+                )
 
-            # Colored category indicator
-            cat_label = Gtk.Label(label=cat_name[0])
-            cat_label.set_size_request(20, 20)
-            cat_label.set_markup(
-                f'<span background="{color}" '
-                f'foreground="white" weight="bold"> {cat_name[0]} </span>'
-            )
-            cat_box.append(cat_label)
+                # Category box
+                cat_box = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=4
+                )
 
-            # Usage label
-            usage_label = Gtk.Label(
-                label=f"{usage:,}",
-                xalign=1
-            )
-            usage_label.add_css_class('dim-label')
-            usage_label.set_size_request(80, -1)
-            cat_box.append(usage_label)
+                # Colored category indicator
+                cat_label = Gtk.Label(label=cat_name[0])
+                cat_label.set_size_request(20, 20)
+                cat_label.set_markup(
+                    f'<span background="{color}" '
+                    f'foreground="white" weight="bold"> '
+                    f'{cat_name[0]} </span>'
+                )
+                cat_box.append(cat_label)
 
-            hbox.append(cat_box)
+                # Usage label
+                usage_label = Gtk.Label(
+                    label=f"{usage:,}",
+                    xalign=1
+                )
+                usage_label.add_css_class('dim-label')
+                usage_label.set_size_request(80, -1)
+                cat_box.append(usage_label)
+
+                hbox.append(cat_box)
+            else:
+                # For characters, add a simple badge
+                char_badge = Gtk.Label()
+                char_badge.set_markup(
+                    '<span background="#50C878" '
+                    'foreground="white" weight="bold"> '
+                    'CHARACTER </span>'
+                )
+                hbox.append(char_badge)
 
             row.set_child(hbox)
             self.listbox.append(row)
@@ -316,10 +374,19 @@ class TagCompletion:
         while iter_start.get_char() in ' \t':
             iter_start.forward_char()
 
-        formatted_tag = tag.replace('_', ' ')
-        formatted_tag = formatted_tag.replace(
-            '(', '\\('
-        ).replace(')', '\\)')
+        # Get the text being replaced to check for character: prefix
+        replaced_text = buffer.get_text(iter_start, iter_cursor, False)
+        is_character = 'character:' in replaced_text.lower()
+
+        if is_character:
+            # For characters, keep as-is and preserve the prefix
+            formatted_tag = f"character:{tag}"
+        else:
+            # For regular tags, replace underscores and escape parens
+            formatted_tag = tag.replace('_', ' ')
+            formatted_tag = formatted_tag.replace(
+                '(', '\\('
+            ).replace(')', '\\)')
 
         buffer.delete(iter_start, iter_cursor)
         buffer.insert(iter_start, formatted_tag + ", ")
