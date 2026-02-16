@@ -1,4 +1,3 @@
-from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource
 import sys
 import json
 import uuid
@@ -12,12 +11,14 @@ import tempfile
 import os
 import queue
 import re
-from tag_completion import TagCompletion
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('GtkSource', '5')
+
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource
+from tag_completion import TagCompletion
 
 
 def setup_language_manager():
