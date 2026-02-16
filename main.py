@@ -219,12 +219,41 @@ class ComfyWindow(Adw.ApplicationWindow):
         preview_panel.append(self.picture)
         self.preview_revealer.set_child(preview_panel)
 
+        self.setup_keybinds()
+
         self.load_danbooru_tags()
 
         self.fetch_node_info()
 
         if self.workflow_file:
             self.load_workflow_file(self.workflow_file)
+
+    def setup_keybinds(self):
+        """
+        Set up global keyboard shortcuts for the window.
+        Ctrl+Enter: Generate image
+        Ctrl+Escape: Stop generation
+        """
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect(
+            "key-pressed", self.on_window_key_pressed
+        )
+        self.add_controller(key_controller)
+
+    def on_window_key_pressed(self, controller, keyval, keycode, state):
+        """
+        Handle window-level keyboard shortcuts.
+        """
+        ctrl = state & Gdk.ModifierType.CONTROL_MASK
+
+        if ctrl and keyval == Gdk.KEY_Return:
+            self.on_generate_clicked(None)
+            return True
+        elif ctrl and keyval == Gdk.KEY_Escape:
+            self.on_stop_clicked(None)
+            return True
+
+        return False
 
     def setup_comment_highlighting(self, buffer):
         """Apply the custom language definition for # comments"""
@@ -514,6 +543,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         return False
     
     def on_textview_key_press(self, textview, keyval, keycode, state):
+        # Handle global keybinds first
+        ctrl = state & Gdk.ModifierType.CONTROL_MASK
+
+        if ctrl and keyval == Gdk.KEY_Return:
+            self.on_generate_clicked(None)
+            return True
+        elif ctrl and keyval == Gdk.KEY_Escape:
+            self.on_stop_clicked(None)
+            return True
+
         # Handle completion popup navigation
         if hasattr(self, 'completion_popup') and self.completion_popup and self.completion_popup.is_visible():
             # Get listbox from popover -> scrolled -> viewport -> listbox
