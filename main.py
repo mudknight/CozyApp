@@ -6,6 +6,7 @@ import threading
 import random
 import requests
 import websocket
+import csv
 import gi
 
 gi.require_version('Gtk', '4.0')
@@ -57,6 +58,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.setup_css()
         self.style_list = []
         self.workflow_data = None
+        self.danbooru_tags = []
 
         # Main Layout container
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -108,13 +110,13 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.pos_buffer = Gtk.TextBuffer()
         self.input_area.append(Gtk.Label(label="Positive Prompt", xalign=0))
-        self.input_area.append(self.create_scrolled(Gtk.TextView(
-            buffer=self.pos_buffer, wrap_mode=Gtk.WrapMode.WORD, vexpand=True)))
+        pos_scrolled, self.pos_textview = self.create_scrolled_textview(self.pos_buffer)
+        self.input_area.append(pos_scrolled)
 
         self.neg_buffer = Gtk.TextBuffer()
         self.input_area.append(Gtk.Label(label="Negative Prompt", xalign=0))
-        self.input_area.append(self.create_scrolled(Gtk.TextView(
-            buffer=self.neg_buffer, wrap_mode=Gtk.WrapMode.WORD, vexpand=True)))
+        neg_scrolled, self.neg_textview = self.create_scrolled_textview(self.neg_buffer)
+        self.input_area.append(neg_scrolled)
 
         self.input_area.append(Gtk.Label(label="Seed", xalign=0))
         seed_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -174,6 +176,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         preview_panel.append(self.picture)
         self.preview_revealer.set_child(preview_panel)
 
+        self.load_danbooru_tags()
+
         self.fetch_node_info()
 
         if self.workflow_file:
@@ -201,8 +205,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         GLib.idle_add(self._log_idle, text)
 
     def _log_idle(self, text):
-        end_iter = self.debug_buffer.get_end_iter()
-        self.debug_buffer.insert(end_iter, f"> {text}\n")
+        if hasattr(self, 'debug_buffer'):
+            end_iter = self.debug_buffer.get_end_iter()
+            self.debug_buffer.insert(end_iter, f"> {text}\n")
 
     def fetch_node_info(self):
         def worker():
@@ -237,11 +242,266 @@ class ComfyWindow(Adw.ApplicationWindow):
         sc.add_css_class("view")
         return sc
 
+    def create_scrolled_textview(self, buffer):
+        textview = Gtk.TextView(
+            buffer=buffer, wrap_mode=Gtk.WrapMode.WORD, vexpand=True)
+        
+        # Track completion state for this textview
+        textview.completion_active = False
+        textview.completion_debounce_id = None
+        
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", lambda controller, keyval, keycode, state: self.on_textview_key_press(textview, keyval, keycode, state))
+        textview.add_controller(key_controller)
+        
+        # Connect to buffer changes for auto-completion
+        buffer.connect("changed", lambda buf: self.on_textview_changed(textview))
+        
+        scrolled = Gtk.ScrolledWindow(
+            child=textview, propagate_natural_height=False, vexpand=True)
+        scrolled.add_css_class("view")
+        return scrolled, textview
+
     def on_toggle_preview(self, btn):
         self.preview_revealer.set_reveal_child(btn.get_active())
 
     def on_toggle_debug(self, btn):
         self.debug_revealer.set_reveal_child(btn.get_active())
+
+    def load_danbooru_tags(self):
+        try:
+            import csv
+            with open('danbooru.csv', 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # Skip header
+                for row in reader:
+                    if row:
+                        self.danbooru_tags.append(row[0])
+            self.log(f"Loaded {len(self.danbooru_tags)} tags from danbooru.csv")
+        except Exception as e:
+            self.log(f"Could not load danbooru.csv: {e}")
+
+    def get_tag_completions(self, text):
+        # Get the last word being typed
+        words = text.replace(',', ' ').split()
+        if not words:
+            return []
+        current = words[-1].lower()
+        if len(current) < 2:
+            return []
+        # Find matching tags
+        matches = [tag for tag in self.danbooru_tags if tag.lower().startswith(current) and tag.lower() != current]
+        return matches[:10]  # Limit to 10 suggestions
+
+    def show_completion_popup(self, textview, suggestions):
+        if not suggestions:
+            return
+        
+        # Close existing popup if open
+        if hasattr(self, 'completion_popup') and self.completion_popup:
+            self.completion_popup.popdown()
+        
+        # Create completion popup using Popover
+        popover = Gtk.Popover()
+        popover.set_parent(textview)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+        popover.set_autohide(False)  # Don't autohide so we can type
+        
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        
+        for i, tag in enumerate(suggestions):
+            row = Gtk.ListBoxRow()
+            label = Gtk.Label(label=tag, xalign=0)
+            label.set_margin_start(8)
+            label.set_margin_end(8)
+            label.set_margin_top(4)
+            label.set_margin_bottom(4)
+            row.set_child(label)
+            listbox.append(row)
+            # Select first item by default
+            if i == 0:
+                listbox.select_row(row)
+        
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_child(listbox)
+        scrolled.set_max_content_height(200)
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_size_request(200, min(len(suggestions) * 30, 200))
+        
+        popover.set_child(scrolled)
+        
+        # Position popup at cursor
+        buffer = textview.get_buffer()
+        cursor = buffer.get_insert()
+        iter_cursor = buffer.get_iter_at_mark(cursor)
+        location = textview.get_iter_location(iter_cursor)
+        
+        # Create a rectangle for positioning
+        rect = Gdk.Rectangle()
+        rect.x = location.x
+        rect.y = location.y + location.height
+        rect.width = 1
+        rect.height = 1
+        
+        popover.set_pointing_to(rect)
+        
+        # Handle selection with mouse click
+        def on_row_activated(listbox, row):
+            tag = suggestions[row.get_index()]
+            self.insert_completion(textview, tag)
+            popover.popdown()
+        
+        listbox.connect("row-activated", on_row_activated)
+        
+        self.completion_popup = popover
+        popover.popup()
+
+    def insert_completion(self, textview, tag):
+        buffer = textview.get_buffer()
+        cursor = buffer.get_insert()
+        iter_cursor = buffer.get_iter_at_mark(cursor)
+        
+        # Find start of word
+        iter_start = iter_cursor.copy()
+        while not iter_start.starts_line():
+            iter_start.backward_char()
+            char = iter_start.get_char()
+            if char in ' ,\n\t':
+                iter_start.forward_char()
+                break
+        
+        # Replace underscores with spaces and escape parentheses
+        formatted_tag = tag.replace('_', ' ')
+        # Escape parentheses by adding backslashes
+        formatted_tag = formatted_tag.replace('(', '\\(').replace(')', '\\)')
+        
+        # Replace the partial word with the formatted tag
+        buffer.delete(iter_start, iter_cursor)
+        buffer.insert(iter_start, formatted_tag + ", ")
+
+    def on_textview_changed(self, textview):
+        """Handle text changes with debounce for auto-completion"""
+        # Cancel existing debounce timer
+        if textview.completion_debounce_id:
+            GLib.source_remove(textview.completion_debounce_id)
+            textview.completion_debounce_id = None
+        
+        # Set up new debounce timer (150ms)
+        textview.completion_debounce_id = GLib.timeout_add(150, lambda: self._show_completion_if_needed(textview))
+    
+    def _show_completion_if_needed(self, textview):
+        """Check if we should show completion and show it"""
+        textview.completion_debounce_id = None
+        
+        if not self.danbooru_tags:
+            return False
+        
+        buffer = textview.get_buffer()
+        cursor = buffer.get_insert()
+        iter_cursor = buffer.get_iter_at_mark(cursor)
+        
+        # Check if we're in a valid completion context
+        if not self._should_show_completion(buffer, iter_cursor):
+            if hasattr(self, 'completion_popup') and self.completion_popup:
+                self.completion_popup.popdown()
+            return False
+        
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        suggestions = self.get_tag_completions(text)
+        
+        if suggestions:
+            self.show_completion_popup(textview, suggestions)
+        elif hasattr(self, 'completion_popup') and self.completion_popup:
+            self.completion_popup.popdown()
+        
+        return False
+    
+    def _should_show_completion(self, buffer, iter_cursor):
+        """Check if cursor is at start of text, start of line, or after comma"""
+        # Get the position
+        offset = iter_cursor.get_offset()
+        
+        if offset == 0:
+            return True
+        
+        # Check the character before cursor
+        iter_before = iter_cursor.copy()
+        iter_before.backward_char()
+        char = iter_before.get_char()
+        
+        # Valid trigger: start of line or after comma/space
+        if char == '\n' or char == ',':
+            return True
+        
+        # Check if we're at the very start (offset 0)
+        iter_line_start = iter_cursor.copy()
+        iter_line_start.set_line_offset(0)
+        
+        # Get text from line start to cursor
+        text_from_start = buffer.get_text(iter_line_start, iter_cursor, False)
+        text_from_start = text_from_start.lstrip()
+        
+        # Check if we have 2+ non-space characters at the start
+        if len(text_from_start) >= 2 and ' ' not in text_from_start:
+            return True
+        
+        return False
+    
+    def on_textview_key_press(self, textview, keyval, keycode, state):
+        # Handle completion popup navigation
+        if hasattr(self, 'completion_popup') and self.completion_popup and self.completion_popup.is_visible():
+            # Get listbox from popover -> scrolled -> viewport -> listbox
+            scrolled = self.completion_popup.get_child()
+            listbox = scrolled.get_child().get_child() if scrolled.get_child() else None
+            
+            if not listbox:
+                return False
+            
+            if keyval == Gdk.KEY_Escape:
+                self.completion_popup.popdown()
+                return True
+            elif keyval == Gdk.KEY_Down:
+                # Select next item
+                selected = listbox.get_selected_row()
+                if selected:
+                    index = selected.get_index()
+                    next_row = listbox.get_row_at_index(index + 1)
+                    if next_row:
+                        listbox.select_row(next_row)
+                else:
+                    first_row = listbox.get_row_at_index(0)
+                    if first_row:
+                        listbox.select_row(first_row)
+                return True
+            elif keyval == Gdk.KEY_Up:
+                # Select previous item
+                selected = listbox.get_selected_row()
+                if selected:
+                    index = selected.get_index()
+                    if index > 0:
+                        prev_row = listbox.get_row_at_index(index - 1)
+                        if prev_row:
+                            listbox.select_row(prev_row)
+                return True
+            elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return):
+                # Complete with selected item
+                selected = listbox.get_selected_row()
+                if selected:
+                    tag = selected.get_child().get_label()
+                    self.insert_completion(textview, tag)
+                    self.completion_popup.popdown()
+                    return True
+        
+        # Check for manual Tab completion (fallback)
+        if keyval == Gdk.KEY_Tab and self.danbooru_tags:
+            buffer = textview.get_buffer()
+            text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            suggestions = self.get_tag_completions(text)
+            if suggestions:
+                self.show_completion_popup(textview, suggestions)
+                return True
+        return False
 
     def load_workflow_file(self, filepath):
         try:
