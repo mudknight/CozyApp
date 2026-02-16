@@ -879,7 +879,25 @@ class ComfyWindow(Adw.ApplicationWindow):
             loader.close()
             pix = loader.get_pixbuf()
             if pix:
-                self.picture.set_paintable(Gdk.Texture.new_for_pixbuf(pix))
+                # Use MemoryTexture instead of deprecated new_for_pixbuf
+                width = pix.get_width()
+                height = pix.get_height()
+                rowstride = pix.get_rowstride()
+                has_alpha = pix.get_has_alpha()
+                pixels = pix.get_pixels()
+
+                # Create GBytes from pixel data
+                gbytes = GLib.Bytes.new(pixels)
+
+                # Determine format based on alpha channel
+                fmt = (Gdk.MemoryFormat.R8G8B8A8 if has_alpha
+                       else Gdk.MemoryFormat.R8G8B8)
+
+                # Create memory texture
+                texture = Gdk.MemoryTexture.new(
+                    width, height, fmt, gbytes, rowstride
+                )
+                self.picture.set_paintable(texture)
         except Exception:
             try:
                 loader.close()
@@ -888,5 +906,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
 
 if __name__ == "__main__":
+    # Use Cairo renderer to avoid Vulkan swapchain warnings
+    os.environ['GSK_RENDERER'] = 'cairo'
     app = ComfyApp()
     app.run(sys.argv)
