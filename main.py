@@ -11,6 +11,7 @@ import gi
 import tempfile
 import os
 import queue
+import re
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -486,6 +487,134 @@ class ComfyWindow(Adw.ApplicationWindow):
         buffer.delete(iter_start, iter_cursor)
         buffer.insert(iter_start, formatted_tag + ", ")
 
+    def adjust_tag_weight(self, textview, increase=True):
+        """
+        Adjust the weight of the tag under the cursor or selected text.
+        Format: (tag:weight) or (tag1, tag2:weight).
+        Weight of 1.0 removes the syntax entirely.
+        """
+        buffer = textview.get_buffer()
+        
+        # Check if text is selected
+        selection = buffer.get_selection_bounds()
+        if selection:
+            # Handle selected text
+            iter_start, iter_end = selection
+            selected_text = buffer.get_text(iter_start, iter_end, False)
+            
+            if not selected_text.strip():
+                return
+            
+            # Check if selection already has weight: (content:1.1)
+            weight_pattern = r'^\((.+?):(\d+\.?\d*)\)$'
+            match = re.match(weight_pattern, selected_text)
+            
+            if match:
+                content = match.group(1)
+                current_weight = float(match.group(2))
+                new_weight = current_weight + (0.1 if increase else -0.1)
+                new_weight = max(0.1, min(2.0, new_weight))
+                
+                # If weight is 1.0, remove the syntax
+                if abs(new_weight - 1.0) < 0.01:
+                    new_text = content
+                else:
+                    new_text = f"({content}:{new_weight:.1f})"
+            else:
+                new_weight = 1.1 if increase else 0.9
+                
+                # If weight would be 1.0, don't add syntax
+                if abs(new_weight - 1.0) < 0.01:
+                    new_text = selected_text
+                else:
+                    new_text = f"({selected_text}:{new_weight:.1f})"
+            
+            # Get the start offset before deletion
+            start_offset = iter_start.get_offset()
+            
+            # Replace the selection
+            buffer.delete(iter_start, iter_end)
+            buffer.insert(iter_start, new_text)
+            
+            # Reselect the new text
+            new_start = buffer.get_iter_at_offset(start_offset)
+            new_end = buffer.get_iter_at_offset(
+                start_offset + len(new_text)
+            )
+            buffer.select_range(new_start, new_end)
+            return
+        
+        # No selection - handle single tag under cursor
+        cursor = buffer.get_insert()
+        iter_cursor = buffer.get_iter_at_mark(cursor)
+        
+        # Find start and end of current tag (comma-separated)
+        iter_start = iter_cursor.copy()
+        iter_end = iter_cursor.copy()
+        
+        # Move start backward to comma or line start
+        leading_space = ""
+        while not iter_start.starts_line():
+            iter_start.backward_char()
+            char = iter_start.get_char()
+            if char == ',':
+                iter_start.forward_char()
+                # Capture leading spaces
+                while iter_start.get_char() == ' ':
+                    leading_space += ' '
+                    iter_start.forward_char()
+                break
+        
+        # Move end forward to comma or line end
+        while not iter_end.ends_line():
+            char = iter_end.get_char()
+            if char == ',':
+                break
+            iter_end.forward_char()
+        
+        # Get the tag text (without leading space)
+        tag_text = buffer.get_text(iter_start, iter_end, False).strip()
+        
+        if not tag_text:
+            return
+        
+        # Check if tag already has weight: (tag text:1.1)
+        weight_pattern = r'^\((.+?):(\d+\.?\d*)\)$'
+        match = re.match(weight_pattern, tag_text)
+        
+        if match:
+            tag_content = match.group(1)
+            current_weight = float(match.group(2))
+            new_weight = current_weight + (0.1 if increase else -0.1)
+            new_weight = max(0.1, min(2.0, new_weight))
+            
+            # If weight is 1.0, remove the syntax
+            if abs(new_weight - 1.0) < 0.01:
+                new_tag = tag_content
+            else:
+                new_tag = f"({tag_content}:{new_weight:.1f})"
+        else:
+            new_weight = 1.1 if increase else 0.9
+            
+            # If weight would be 1.0, don't add syntax
+            if abs(new_weight - 1.0) < 0.01:
+                new_tag = tag_text
+            else:
+                new_tag = f"({tag_text}:{new_weight:.1f})"
+        
+        # Move iter_start back to include leading space
+        iter_start_with_space = iter_cursor.copy()
+        while not iter_start_with_space.starts_line():
+            iter_start_with_space.backward_char()
+            char = iter_start_with_space.get_char()
+            if char == ',':
+                iter_start_with_space.forward_char()
+                break
+        
+        # Replace the tag (preserving leading space)
+        buffer.delete(iter_start_with_space, iter_end)
+        buffer.insert(iter_start_with_space, leading_space + new_tag)
+
     def on_textview_changed(self, textview):
         """Handle text changes with debounce for auto-completion"""
         # Cancel existing debounce timer
@@ -561,6 +690,12 @@ class ComfyWindow(Adw.ApplicationWindow):
             return True
         elif ctrl and keyval == Gdk.KEY_Escape:
             self.on_stop_clicked(None)
+            return True
+        elif ctrl and keyval == Gdk.KEY_Up:
+            self.adjust_tag_weight(textview, increase=True)
+            return True
+        elif ctrl and keyval == Gdk.KEY_Down:
+            self.adjust_tag_weight(textview, increase=False)
             return True
 
         # Handle completion popup navigation
