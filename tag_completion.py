@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tag autocompletion functionality for ComfyUI frontend."""
 
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, Pango
 import csv
 
 
@@ -10,6 +10,16 @@ class TagCompletion:
     Handles tag autocompletion from danbooru.csv file.
     """
 
+    # Category color mapping
+    CATEGORY_COLORS = {
+        0: ('#4A90E2', 'General'),       # Blue
+        1: ('#F5A623', 'Artist'),        # Orange
+        2: ('#9B9B9B', 'Unused'),        # Gray
+        3: ('#BD10E0', 'Copyright'),     # Purple
+        4: ('#7ED321', 'Character'),     # Green
+        5: ('#D0021B', 'Post'),          # Red
+    }
+
     def __init__(self, log_callback=None):
         """
         Initialize tag completion.
@@ -17,7 +27,9 @@ class TagCompletion:
         Args:
             log_callback: Optional callback function for logging messages
         """
-        self.danbooru_tags = []
+        self.tag_data = {}  # tag -> (category, usage)
+        self.tag_aliases = {}  # alias -> original_tag
+        self.sorted_tags = []
         self.completion_popup = None
         self.log = log_callback if log_callback else lambda x: None
 
@@ -29,14 +41,38 @@ class TagCompletion:
             filepath: Path to the CSV file containing tags
         """
         try:
+            tag_list = []
             with open(filepath, 'r', encoding='utf-8') as f:
                 reader = csv.reader(f)
-                next(reader, None)
                 for row in reader:
-                    if row:
-                        self.danbooru_tags.append(row[0])
+                    if len(row) >= 3:
+                        tag = row[0]
+                        category = int(row[1])
+                        usage = int(row[2])
+                        aliases = row[3].split(',') if len(row) > 3 and (
+                            row[3]
+                        ) else []
+
+                        tag_list.append((tag, category, usage))
+                        self.tag_data[tag] = (category, usage)
+
+                        # Add aliases
+                        for alias in aliases:
+                            alias = alias.strip()
+                            if alias:
+                                self.tag_aliases[alias] = tag
+
+            # Sort by usage (descending)
+            tag_list.sort(key=lambda x: x[2], reverse=True)
+            self.sorted_tags = [tag for tag, _, _ in tag_list]
+
+            total_tags = (
+                len(self.sorted_tags) + len(self.tag_aliases)
+            )
             self.log(
-                f"Loaded {len(self.danbooru_tags)} tags from {filepath}"
+                f"Loaded {len(self.sorted_tags)} tags and "
+                f"{len(self.tag_aliases)} aliases from {filepath} "
+                f"(total: {total_tags})"
             )
         except Exception as e:
             self.log(f"Could not load {filepath}: {e}")
@@ -57,10 +93,34 @@ class TagCompletion:
         current = words[-1].lower()
         if len(current) < 2:
             return []
-        matches = [
-            tag for tag in self.danbooru_tags
-            if tag.lower().startswith(current) and tag.lower() != current
-        ]
+
+        matches = []
+        seen = set()
+
+        # Search in sorted tags (already sorted by usage)
+        for tag in self.sorted_tags:
+            if tag.lower().startswith(current) and (
+                tag.lower() != current
+            ):
+                if tag not in seen:
+                    matches.append(tag)
+                    seen.add(tag)
+                if len(matches) >= 10:
+                    break
+
+        # Search in aliases
+        if len(matches) < 10:
+            for alias, original_tag in self.tag_aliases.items():
+                if alias.lower().startswith(current) and (
+                    alias.lower() != current
+                ):
+                    # Use original tag but show it came from alias
+                    if original_tag not in seen:
+                        matches.append(original_tag)
+                        seen.add(original_tag)
+                    if len(matches) >= 10:
+                        break
+
         return matches[:10]
 
     def show_popup(self, textview, suggestions):
@@ -87,23 +147,63 @@ class TagCompletion:
 
         for i, tag in enumerate(suggestions):
             row = Gtk.ListBoxRow()
-            label = Gtk.Label(label=tag, xalign=0)
-            label.set_margin_start(8)
-            label.set_margin_end(8)
-            label.set_margin_top(4)
-            label.set_margin_bottom(4)
-            row.set_child(label)
+
+            # Get tag data
+            category, usage = self.tag_data.get(tag, (0, 0))
+            color, cat_name = self.CATEGORY_COLORS.get(
+                category, ('#CCCCCC', 'Unknown')
+            )
+
+            # Create horizontal box for tag display
+            hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                           spacing=8)
+            hbox.set_margin_start(8)
+            hbox.set_margin_end(8)
+            hbox.set_margin_top(4)
+            hbox.set_margin_bottom(4)
+
+            # Tag label
+            tag_label = Gtk.Label(label=tag, xalign=0)
+            tag_label.set_hexpand(True)
+            hbox.append(tag_label)
+
+            # Category box
+            cat_box = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=4
+            )
+
+            # Colored category indicator
+            cat_label = Gtk.Label(label=cat_name[0])
+            cat_label.set_size_request(20, 20)
+            cat_label.set_markup(
+                f'<span background="{color}" '
+                f'foreground="white" weight="bold"> {cat_name[0]} </span>'
+            )
+            cat_box.append(cat_label)
+
+            # Usage label
+            usage_label = Gtk.Label(
+                label=f"{usage:,}",
+                xalign=1
+            )
+            usage_label.add_css_class('dim-label')
+            usage_label.set_size_request(80, -1)
+            cat_box.append(usage_label)
+
+            hbox.append(cat_box)
+
+            row.set_child(hbox)
             listbox.append(row)
             if i == 0:
                 listbox.select_row(row)
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_child(listbox)
-        scrolled.set_max_content_height(200)
+        scrolled.set_max_content_height(300)
         scrolled.set_policy(
             Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
         )
-        scrolled.set_size_request(200, min(len(suggestions) * 30, 200))
+        scrolled.set_size_request(400, min(len(suggestions) * 40, 300))
 
         popover.set_child(scrolled)
 
@@ -209,7 +309,7 @@ class TagCompletion:
         """
         if not (self.completion_popup and
                 self.completion_popup.is_visible()):
-            if keyval == Gdk.KEY_Tab and self.danbooru_tags:
+            if keyval == Gdk.KEY_Tab and self.sorted_tags:
                 buffer = textview.get_buffer()
                 text = buffer.get_text(
                     buffer.get_start_iter(),
@@ -260,8 +360,13 @@ class TagCompletion:
             if not selected:
                 selected = listbox.get_row_at_index(0)
             if selected:
-                tag = selected.get_child().get_label()
-                self.insert_completion(textview, tag)
+                # Extract tag from the hbox structure
+                hbox = selected.get_child()
+                if hbox:
+                    tag_label = hbox.get_first_child()
+                    if tag_label:
+                        tag = tag_label.get_label()
+                        self.insert_completion(textview, tag)
                 self.completion_popup.popdown()
             return True
 
