@@ -418,32 +418,30 @@ class ComfyWindow(Adw.ApplicationWindow):
         return False
     
     def _should_show_completion(self, buffer, iter_cursor):
-        """Check if cursor is at start of text, start of line, or after comma"""
-        # Get the position
+        """Check if cursor is after 2 non-space characters at start of line or after comma"""
         offset = iter_cursor.get_offset()
         
         if offset == 0:
-            return True
+            return False
         
-        # Check the character before cursor
-        iter_before = iter_cursor.copy()
-        iter_before.backward_char()
-        char = iter_before.get_char()
+        # Find the start of the current "tag" (either line start or after comma)
+        iter_tag_start = iter_cursor.copy()
         
-        # Valid trigger: start of line or after comma/space
-        if char == '\n' or char == ',':
-            return True
+        while not iter_tag_start.starts_line():
+            iter_tag_start.backward_char()
+            char = iter_tag_start.get_char()
+            if char == '\n' or char == ',':
+                iter_tag_start.forward_char()  # Move past the separator
+                break
         
-        # Check if we're at the very start (offset 0)
-        iter_line_start = iter_cursor.copy()
-        iter_line_start.set_line_offset(0)
+        # Get text from tag start to cursor
+        text_from_tag_start = buffer.get_text(iter_tag_start, iter_cursor, False)
         
-        # Get text from line start to cursor
-        text_from_start = buffer.get_text(iter_line_start, iter_cursor, False)
-        text_from_start = text_from_start.lstrip()
+        # Count non-space characters
+        non_space_chars = ''.join(text_from_tag_start.split())
         
-        # Check if we have 2+ non-space characters at the start
-        if len(text_from_start) >= 2 and ' ' not in text_from_start:
+        # Check if we have 2+ non-space characters (and no other separators)
+        if len(non_space_chars) >= 2 and '\n' not in text_from_tag_start and ',' not in text_from_tag_start:
             return True
         
         return False
