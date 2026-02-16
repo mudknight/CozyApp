@@ -166,8 +166,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         css_provider = Gtk.CssProvider()
         css_content = """
             revealer { background-color: transparent; border: none; }
-            .preview-panel { background-color: shade(@window_bg_color, 1.02); border-left: 1px solid @border_color; }
-            .view { border: 1px solid @border_color; border-radius: 8px; background-color: @view_bg_color; }
+            .preview-panel { background-color: @card_bg_color; border-left: none; }
+            .view { border: none; border-radius: 8px; background-color: @view_bg_color; }
             .debug-text { font-family: monospace; font-size: 11px; opacity: 0.8; }
             separator { background-color: transparent; }
         """
