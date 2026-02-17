@@ -316,13 +316,23 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.input_area.append(seed_box)
 
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.gen_button = Gtk.Button(label="Generate", css_classes=[
+        self.gen_button = Gtk.Button(label="Queue", css_classes=[
                                      "suggested-action"])
         self.gen_button.connect("clicked", self.on_generate_clicked)
         self.stop_button = Gtk.Button(
             label="Stop", css_classes=["destructive-action"])
         self.stop_button.connect("clicked", self.on_stop_clicked)
         self.stop_button.set_sensitive(False)
+
+        # Batch count spinner: how many generations to queue at once
+        self.batch_adj = Gtk.Adjustment(
+            value=1, lower=1, upper=99, step_increment=1
+        )
+        self.batch_entry = Gtk.SpinButton(
+            adjustment=self.batch_adj, numeric=True
+        )
+        self.batch_entry.set_tooltip_text("Number of images to queue")
+        self.batch_entry.set_width_chars(3)
 
         # Queue label styled like a button
         self.queue_box = Gtk.Box(
@@ -353,11 +363,20 @@ class ComfyWindow(Adw.ApplicationWindow):
             Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         self.queue_box.append(self.current_node_label)
 
+        # Wrap Queue button and batch spinner together as a joined widget
+        self.queue_group = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=0,
+            css_classes=['queue-group']
+        )
+        self.queue_group.append(self.gen_button)
+        self.queue_group.append(self.batch_entry)
+
         # Order elements in button box
         btn_box.append(self.queue_box)
         btn_box.append(self.progress_bar)
         btn_box.append(self.stop_button)
-        btn_box.append(self.gen_button)
+        btn_box.append(self.queue_group)
 
         self.input_area.append(btn_box)
 
@@ -717,14 +736,24 @@ class ComfyWindow(Adw.ApplicationWindow):
     def on_window_key_pressed(self, controller, keyval, keycode, state):
         """
         Handle window-level keyboard shortcuts.
+        Ctrl+Enter:  Queue generation
+        Ctrl+Escape: Stop generation
+        Alt+Up/Down: Increment/decrement batch count
         """
         ctrl = state & Gdk.ModifierType.CONTROL_MASK
+        alt = state & Gdk.ModifierType.ALT_MASK
 
         if ctrl and keyval == Gdk.KEY_Return:
             self.on_generate_clicked(None)
             return True
         elif ctrl and keyval == Gdk.KEY_Escape:
             self.on_stop_clicked(None)
+            return True
+        elif alt and keyval == Gdk.KEY_Up:
+            self.batch_adj.set_value(self.batch_adj.get_value() + 1)
+            return True
+        elif alt and keyval == Gdk.KEY_Down:
+            self.batch_adj.set_value(self.batch_adj.get_value() - 1)
             return True
 
         return False
@@ -786,6 +815,16 @@ class ComfyWindow(Adw.ApplicationWindow):
             }
             .about-image {
                 border-radius: 16px;
+            }
+            /* Queue button and batch spinner joined widget */
+            .queue-group > button {
+                border-top-right-radius: 0;
+                border-bottom-right-radius: 0;
+            }
+            .queue-group > spinbutton {
+                border-top-left-radius: 0;
+                border-bottom-left-radius: 0;
+                border-left-width: 0;
             }
         """
         css_provider.load_from_data(css_content, len(css_content))
@@ -1123,6 +1162,7 @@ class ComfyWindow(Adw.ApplicationWindow):
     def on_textview_key_press(self, textview, keyval, keycode, state):
         # Handle global keybinds first
         ctrl = state & Gdk.ModifierType.CONTROL_MASK
+        alt = state & Gdk.ModifierType.ALT_MASK
 
         if ctrl and keyval == Gdk.KEY_Return:
             self.on_generate_clicked(None)
@@ -1135,6 +1175,12 @@ class ComfyWindow(Adw.ApplicationWindow):
             return True
         elif ctrl and keyval == Gdk.KEY_Down:
             self.adjust_tag_weight(textview, increase=False)
+            return True
+        elif alt and keyval == Gdk.KEY_Up:
+            self.batch_adj.set_value(self.batch_adj.get_value() + 1)
+            return True
+        elif alt and keyval == Gdk.KEY_Down:
+            self.batch_adj.set_value(self.batch_adj.get_value() - 1)
             return True
 
         # Handle completion with tag_completion module
@@ -1276,16 +1322,17 @@ class ComfyWindow(Adw.ApplicationWindow):
 
     def on_generate_clicked(self, _):
         """
-        Add a generation request to the queue.
+        Queue one or more generation requests.
+
+        Each item gets a unique random seed.  In Fixed mode the seed
+        entry shows the seed used for the first item; subsequent items
+        still receive individual random seeds so every result differs.
         """
         if not self.workflow_data:
             return
-        if self.seed_mode_combo.get_selected() == 0:
-            self.seed_adj.set_value(float(random.randint(0, 2**32)))
 
         self.save_current_state()
 
-        current_seed = int(self.seed_adj.get_value())
         pos = self.pos_buffer.get_text(
             self.pos_buffer.get_start_iter(),
             self.pos_buffer.get_end_iter(), False
@@ -1300,7 +1347,6 @@ class ComfyWindow(Adw.ApplicationWindow):
             if self.style_list and sel_idx != Gtk.INVALID_LIST_POSITION
             else None
         )
-
         model_idx = self.model_dropdown.get_selected()
         model = (
             self.model_list[model_idx]
@@ -1308,20 +1354,45 @@ class ComfyWindow(Adw.ApplicationWindow):
             else None
         )
 
-        workflow_copy = json.loads(json.dumps(self.workflow_data))
-        for node in workflow_copy.values():
-            if node.get("class_type") == PROMPT_NODE_CLASS:
-                node["inputs"].update({"positive": pos, "negative": neg})
-                if style:
-                    node["inputs"]["style"] = style
-            elif node.get("class_type") == LOADER_NODE_CLASS:
-                node["inputs"]["seed"] = current_seed
-                if model:
-                    node["inputs"]["ckpt_name"] = model
+        batch_count = int(self.batch_adj.get_value())
+        randomize = self.seed_mode_combo.get_selected() == 0
 
-        self.gen_queue.put(workflow_copy)
+        # Use the current seed for Fixed mode first item; always
+        # randomize from the second item onward so each result differs
+        base_seed = int(self.seed_adj.get_value())
+
+        for i in range(batch_count):
+            if randomize or i > 0:
+                # Pick a fresh seed for every item in Randomize mode,
+                # and for all items after the first in Fixed mode
+                seed = random.randint(0, 2**32)
+            else:
+                seed = base_seed
+
+            # Update the spin button to reflect the last seed queued
+            if i == 0:
+                GLib.idle_add(self.seed_adj.set_value, float(seed))
+
+            workflow_copy = json.loads(json.dumps(self.workflow_data))
+            for node in workflow_copy.values():
+                if node.get("class_type") == PROMPT_NODE_CLASS:
+                    node["inputs"].update(
+                        {"positive": pos, "negative": neg}
+                    )
+                    if style:
+                        node["inputs"]["style"] = style
+                elif node.get("class_type") == LOADER_NODE_CLASS:
+                    node["inputs"]["seed"] = seed
+                    if model:
+                        node["inputs"]["ckpt_name"] = model
+
+            self.gen_queue.put(workflow_copy)
+
         self.update_queue_label()
-        self.log(f"Added to queue (queue size: {self.gen_queue.qsize()})")
+        self.log(
+            f"Queued {batch_count} item(s) "
+            f"(queue size: {self.gen_queue.qsize()})"
+        )
 
         if not self.is_processing:
             threading.Thread(
