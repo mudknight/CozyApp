@@ -511,6 +511,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Store default cursor
         self.default_cursor = None
         self.crosshair_cursor = Gdk.Cursor.new_from_name("crosshair")
+        # Active preview context popover
+        self._preview_popover = None
+
+        # Right-click context menu on the preview picture
+        preview_gesture = Gtk.GestureClick()
+        preview_gesture.set_button(3)
+        preview_gesture.connect(
+            'pressed', self._on_preview_right_click
+        )
+        self.picture.add_controller(preview_gesture)
 
         # Gallery page — clicking a thumbnail updates the shared preview
         self.gallery = GalleryPage(
@@ -811,17 +821,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         css_provider = Gtk.CssProvider()
         css_content = """
             .gallery-thumb { border-radius: 8px; }
-            .gallery-delete-btn {
-                padding: 4px;
-                min-width: 0;
-                min-height: 0;
-                border-radius: 6px;
-                background-color: alpha(@error_color, 0.75);
-                color: white;
-            }
-            .gallery-delete-btn:hover {
-                background-color: @error_color;
-            }
             revealer { background-color: transparent; border: none; }
             .preview-panel { background-color: @card_bg_color; border-left: none; }
             .view { border: none; border-radius: 8px; background-color: @view_bg_color; }
@@ -1739,6 +1738,105 @@ class ComfyWindow(Adw.ApplicationWindow):
                 self._show_pixbuf_in_preview(self.gallery_selected_pixbuf)
             else:
                 self.preview_stack.set_visible_child_name('placeholder')
+
+    def _on_preview_right_click(self, gesture, n_press, x, y):
+        """Show context menu on right-click in the preview panel."""
+        if not self.current_pixbuf:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._show_preview_context_menu(x, y)
+
+    def _show_preview_context_menu(self, x, y):
+        """Build and show the preview context popover at (x, y)."""
+        if self._preview_popover:
+            self._preview_popover.popdown()
+
+        popover = Gtk.Popover()
+        popover.set_parent(self.picture)
+        popover.set_has_arrow(False)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=2,
+            margin_top=4, margin_bottom=4,
+            margin_start=4, margin_end=4
+        )
+
+        def add_btn(label, cb):
+            btn = Gtk.Button(label=label, has_frame=False)
+            btn.set_halign(Gtk.Align.FILL)
+            btn.connect('clicked', lambda b: (popover.popdown(), cb()))
+            box.append(btn)
+
+        add_btn('Copy to Clipboard', self._preview_copy)
+        add_btn('Save to\u2026', self._preview_save)
+        box.append(Gtk.Separator())
+        add_btn('Delete', self._preview_delete)
+
+        popover.set_child(box)
+        self._preview_popover = popover
+        popover.popup()
+
+    def _preview_copy(self):
+        """Copy the currently displayed preview image to the clipboard."""
+        if not self.current_pixbuf:
+            return
+        texture = self._pixbuf_to_texture(self.current_pixbuf)
+        content = Gdk.ContentProvider.new_for_value(texture)
+        Gdk.Display.get_default().get_clipboard().set_content(content)
+
+    def _preview_save(self):
+        """Show a save-file dialog for the current preview image."""
+        if not self.current_pixbuf:
+            return
+        pixbuf = self.current_pixbuf
+        dialog = Gtk.FileChooserNative(
+            title='Save Image',
+            action=Gtk.FileChooserAction.SAVE,
+            accept_label='Save',
+            cancel_label='Cancel',
+            transient_for=self
+        )
+        dialog.set_current_name('image.png')
+        dialog.connect(
+            'response',
+            lambda d, r: self._on_preview_save_response(d, r, pixbuf)
+        )
+        dialog.show()
+
+    def _on_preview_save_response(self, dialog, response, pixbuf):
+        if response == Gtk.ResponseType.ACCEPT:
+            path = dialog.get_file().get_path()
+            if not path.lower().endswith('.png'):
+                path += '.png'
+            try:
+                pixbuf.savev(path, 'png', [], [])
+            except Exception as e:
+                self.log(f'Preview save error: {e}')
+        dialog.destroy()
+
+    def _preview_delete(self):
+        """Clear the preview; if it is a gallery image, delete it there too."""
+        pixbuf = self.current_pixbuf
+        if pixbuf is None:
+            return
+
+        # If this pixbuf came from the gallery, delete it there too
+        if self.gallery_selected_pixbuf is pixbuf:
+            self.gallery.delete_by_pixbuf(pixbuf)
+            self.gallery_selected_pixbuf = None
+
+        # Clear the generate-tab reference if it matches
+        if self.gen_pixbuf is pixbuf:
+            self.gen_pixbuf = None
+
+        self.current_pixbuf = None
+        self.preview_stack.set_visible_child_name('placeholder')
 
     def update_image(self, data):
         loader = GdkPixbuf.PixbufLoader.new()
