@@ -1,3 +1,4 @@
+#!/usr/bin/python3 -u
 import sys
 import json
 import uuid
@@ -143,11 +144,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Header
         self.header = Adw.HeaderBar()
         self.main_box.append(self.header)
-
-        self.debug_toggle = Gtk.ToggleButton(
-            icon_name="utilities-terminal-symbolic")
-        self.debug_toggle.connect("toggled", self.on_toggle_debug)
-        self.header.pack_start(self.debug_toggle)
 
         self.magnifier_toggle = Gtk.ToggleButton(
             icon_name="system-search-symbolic")
@@ -335,25 +331,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         btn_box.append(self.gen_button)
 
         self.input_area.append(btn_box)
-
-        # Bottom section: Debug (Split vertically from inputs)
-        self.debug_revealer = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.SLIDE_UP,
-            reveal_child=False, vexpand=False)
-        self.sidebar_vbox.append(self.debug_revealer)
-
-        debug_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        debug_box.set_size_request(-1, 200)
-        debug_box.set_margin_start(20)
-        debug_box.set_margin_end(20)
-        debug_box.set_margin_bottom(20)
-
-        self.debug_buffer = Gtk.TextBuffer()
-        debug_view = Gtk.TextView(
-            buffer=self.debug_buffer, editable=False,
-            wrap_mode=Gtk.WrapMode.CHAR, css_classes=["debug-text"])
-        debug_box.append(self.create_scrolled(debug_view))
-        self.debug_revealer.set_child(debug_box)
 
         # --- Preview (Right Column) ---
         self.preview_revealer = Gtk.Revealer(
@@ -710,7 +687,6 @@ class ComfyWindow(Adw.ApplicationWindow):
             revealer { background-color: transparent; border: none; }
             .preview-panel { background-color: @card_bg_color; border-left: none; }
             .view { border: none; border-radius: 8px; background-color: @view_bg_color; }
-            .debug-text { font-family: monospace; font-size: 11px; opacity: 0.8; }
             gutter { background-color: alpha(@view_fg_color, 0.05); border-right: 1px solid alpha(@view_fg_color, 0.1); }
             .magnifier-frame {
                 border: 2px solid alpha(currentColor, 0.3);
@@ -749,12 +725,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         ), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def log(self, text):
-        GLib.idle_add(self._log_idle, text)
-
-    def _log_idle(self, text):
-        if hasattr(self, 'debug_buffer'):
-            end_iter = self.debug_buffer.get_end_iter()
-            self.debug_buffer.insert(end_iter, f"> {text}\n")
+        print(f"{text}", flush=True)
 
     def fetch_node_info(self):
         def worker():
@@ -891,9 +862,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Hide magnifier when disabled
         if not self.magnifier_enabled and self.magnifier_frame.get_visible():
             self.magnifier_frame.set_visible(False)
-
-    def on_toggle_debug(self, btn):
-        self.debug_revealer.set_reveal_child(btn.get_active())
 
     def on_textview_changed(self, textview):
         """
