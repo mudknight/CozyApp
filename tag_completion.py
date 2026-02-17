@@ -303,6 +303,7 @@ class TagCompletion:
         popover.set_parent(textview)
         popover.set_position(Gtk.PositionType.BOTTOM)
         popover.set_autohide(False)
+        popover.set_has_arrow(False)
 
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
