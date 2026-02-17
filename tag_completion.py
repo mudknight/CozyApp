@@ -219,9 +219,11 @@ class TagCompletion:
                 if not search:
                     # Return all LoRAs if nothing typed yet
                     return self.loras[:10]
+                # Match against the filename only (after last /),
+                # using substring so partial names resolve correctly
                 matches = [
                     lora for lora in self.loras
-                    if lora.lower().startswith(search)
+                    if search in lora.split('/')[-1].lower()
                 ]
                 return matches[:10]
 
