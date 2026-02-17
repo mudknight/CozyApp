@@ -236,9 +236,10 @@ class TagCompletion:
                 if not search:
                     # Return all characters if nothing typed yet
                     return self.characters[:10]
+                # Substring match against the name only (after last /)
                 matches = [
                     char for char in self.characters
-                    if char.lower().startswith(search)
+                    if search in char.split('/')[-1].lower()
                 ]
                 return matches[:10]
 
@@ -253,23 +254,34 @@ class TagCompletion:
         seen = set()
 
         # Search in sorted tags (already sorted by usage)
+        # Prefix matches first, then substring matches
+        prefix_matches = []
+        substr_matches = []
         for tag in self.sorted_tags:
-            if tag.lower().startswith(current) and (
-                tag.lower() != current
-            ):
-                if tag not in seen:
-                    matches.append(tag)
-                    seen.add(tag)
-                if len(matches) >= 10:
-                    break
+            tl = tag.lower()
+            if tl == current:
+                continue
+            if tl.startswith(current):
+                prefix_matches.append(tag)
+            elif current in tl:
+                substr_matches.append(tag)
+            if len(prefix_matches) >= 10:
+                break
+
+        for tag in prefix_matches + substr_matches:
+            if tag not in seen:
+                matches.append(tag)
+                seen.add(tag)
+            if len(matches) >= 10:
+                break
 
         # Search in aliases
         if len(matches) < 10:
             for alias, original_tag in self.tag_aliases.items():
-                if alias.lower().startswith(current) and (
-                    alias.lower() != current
-                ):
-                    # Use original tag but show it came from alias
+                al = alias.lower()
+                if al == current:
+                    continue
+                if al.startswith(current) or current in al:
                     if original_tag not in seen:
                         matches.append(original_tag)
                         seen.add(original_tag)
