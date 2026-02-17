@@ -106,7 +106,7 @@ class ComfyApp(Adw.Application):
 class ComfyWindow(Adw.ApplicationWindow):
     def __init__(self, workflow_file=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.set_title("ComfierUI")
+        self.set_title("CozyApp")
         self.set_default_size(1200, 900)
         self.workflow_file = workflow_file
 
@@ -1116,6 +1116,10 @@ class ComfyWindow(Adw.ApplicationWindow):
         """
         ws = websocket.WebSocket()
         try:
+            # Calculate total nodes for progress tracking
+            total_nodes = len(workflow_data)
+            nodes_completed = 0
+
             ws.connect(f"ws://{SERVER_ADDRESS}/ws?clientId={CLIENT_ID}")
             payload = {"prompt": workflow_data, "client_id": CLIENT_ID}
             resp = requests.post(
@@ -1134,10 +1138,24 @@ class ComfyWindow(Adw.ApplicationWindow):
 
                 msg = json.loads(out)
                 if msg['type'] == 'progress':
-                    val = msg['data']['value'] / msg['data']['max']
-                    GLib.idle_add(self.progress_bar.set_fraction, val)
+                    # Calculate overall progress:
+                    # (completed nodes / total) + (current node progress
+                    # / total)
+                    node_progress = (
+                        msg['data']['value'] / msg['data']['max']
+                    )
+                    overall_progress = (
+                        (nodes_completed / total_nodes) +
+                        (node_progress / total_nodes)
+                    )
+                    GLib.idle_add(
+                        self.progress_bar.set_fraction, overall_progress
+                    )
 
                 if msg['type'] == 'executed':
+                    # Node completed, increment counter
+                    nodes_completed += 1
+
                     if 'images' in msg['data']['output']:
                         img = msg['data']['output']['images'][0]
                         img_resp = requests.get(
