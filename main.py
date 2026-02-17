@@ -583,6 +583,12 @@ class ComfyWindow(Adw.ApplicationWindow):
                 font-weight: bold;
                 min-width: 60px;
             }
+            .queue-active {
+                background-color: alpha(@accent_bg_color, 0.3);
+                border-color: @accent_bg_color;
+                color: @accent_fg_color;
+                opacity: 1.0;
+            }
         """
         css_provider.load_from_data(css_content, len(css_content))
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(
@@ -985,7 +991,17 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Include currently processing image in count
         total_count = queue_size + (1 if self.is_processing else 0)
         text = f"Queue: {total_count}"
-        GLib.idle_add(self.queue_label.set_text, text)
+        GLib.idle_add(self._update_queue_label_ui, text, total_count)
+
+    def _update_queue_label_ui(self, text, count):
+        """Update queue label text and styling."""
+        self.queue_label.set_text(text)
+        if count > 0:
+            if not self.queue_label.has_css_class('queue-active'):
+                self.queue_label.add_css_class('queue-active')
+        else:
+            if self.queue_label.has_css_class('queue-active'):
+                self.queue_label.remove_css_class('queue-active')
 
     def on_stop_clicked(self, _):
         try:
