@@ -260,17 +260,13 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.current_node_label.set_max_width_chars(20)
         self.current_node_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.current_node_label.set_valign(Gtk.Align.CENTER)
-        # progress_box.append(self.current_node_label)
-        # progress_box.append(self.progress_bar)
 
         self.queue_box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         self.queue_box.append(self.current_node_label)
-        btn_box.append(self.queue_box)
-        # btn_box.append(self.current_node_label)
         btn_box.append(self.progress_bar)
+        btn_box.append(self.queue_box)
 
         self.input_area.append(btn_box)
-        # self.input_area.append(progress_box)
 
         # Bottom section: Debug (Split vertically from inputs)
         self.debug_revealer = Gtk.Revealer(
@@ -652,18 +648,16 @@ class ComfyWindow(Adw.ApplicationWindow):
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
             }
             .queue-badge {
-                border-radius: 6px;
+                border-radius: 9px;
                 background-color: alpha(@view_fg_color, 0.1);
-                border: 1px solid alpha(@view_fg_color, 0.15);
-                color: @view_fg_color;
+                color: alpha(@view_fg_color, 0.5);
                 opacity: 0.7;
-                font-weight: bold;
                 min-width: 60px;
             }
             .queue-active {
                 background-color: alpha(@accent_bg_color, 0.3);
                 border-color: @accent_bg_color;
-                color: @accent_fg_color;
+                color: alpha(@accent_fg_color, 0.7);
                 opacity: 1.0;
             }
             .current-node-label {
