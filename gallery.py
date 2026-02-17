@@ -1,13 +1,14 @@
 #!/usr/bin/python3
 """Gallery page: thumbnail grid with multi-select and context menus."""
 import os
+import tempfile
 import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('GdkPixbuf', '2.0')
 
-from gi.repository import Gtk, Adw, Gdk, GdkPixbuf, GLib  # noqa
+from gi.repository import Gtk, Adw, Gdk, GdkPixbuf, GLib, Gio  # noqa
 
 THUMBNAIL_SIZE = 220
 
@@ -251,6 +252,8 @@ class GalleryPage(Gtk.ScrolledWindow):
                     lambda pb=pb: self._save_single(pb, anchor_child))
         elif n > 1 and pixbufs:
             pbs = list(pixbufs)
+            add_btn(f'Copy {n} Images',
+                    lambda pbs=pbs: self._copy_multiple_to_clipboard(pbs))
             add_btn(f'Save {n} images to folder\u2026',
                     lambda pbs=pbs: self._save_multiple(pbs, anchor_child))
 
@@ -281,6 +284,60 @@ class GalleryPage(Gtk.ScrolledWindow):
             content = Gdk.ContentProvider.new_for_value(texture)
 
         self.get_clipboard().set_content(content)
+
+    def _copy_multiple_to_clipboard(self, pixbufs):
+        """Copy multiple pixbufs to the system clipboard as files."""
+        # Many apps (like Telegram) prefer a list of files for multi-image paste.
+        temp_files = []
+        file_list = []
+
+        for i, pb in enumerate(pixbufs):
+            try:
+                # Create a temporary file that persists long enough for the paste
+                tmp = tempfile.NamedTemporaryFile(suffix=f"_{i}.png", delete=False)
+                tmp.close()
+                path = tmp.name
+                pb.savev(path, "png", [], [])
+                
+                temp_files.append(path)
+                file_list.append(Gio.File.new_for_path(path))
+            except Exception as e:
+                print(f"Failed to create temp file for clipboard: {e}")
+
+        if not file_list:
+            return
+
+        # Create a FileList (GDK4) and a ContentProvider for it
+        gdk_file_list = Gdk.FileList.new_from_list(file_list)
+        content = Gdk.ContentProvider.new_for_value(gdk_file_list)
+        
+        # We also provide a union with the first image's texture/png 
+        # as a fallback for apps that don't handle file lists.
+        first_pb = pixbufs[0]
+        texture = self._texture_from_pixbuf(first_pb)
+        success, buffer = first_pb.save_to_bufferv("png", [], [])
+        
+        fallback_providers = [content]
+        fallback_providers.append(Gdk.ContentProvider.new_for_value(texture))
+        if success:
+            fallback_providers.append(
+                Gdk.ContentProvider.new_for_bytes("image/png", GLib.Bytes.new(buffer))
+            )
+            
+        union_content = Gdk.ContentProvider.new_union(fallback_providers)
+        self.get_clipboard().set_content(union_content)
+
+        # Cleanup: we can't delete immediately because the paste is asynchronous.
+        # We'll schedule a cleanup after a reasonable delay (30 seconds).
+        def cleanup():
+            for f in temp_files:
+                try:
+                    os.unlink(f)
+                except:
+                    pass
+            return False
+
+        GLib.timeout_add_seconds(30, cleanup)
 
     def _save_single(self, pixbuf, anchor):
         """Show a file-save dialog for a single image."""
