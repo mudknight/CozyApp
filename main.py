@@ -240,7 +240,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.queue_label = Gtk.Label(
             label="Queue: 0", xalign=0.5
         )
-        self.queue_label.set_size_request(100, -1)
+        self.queue_label.set_width_chars(10)
+        self.queue_label.set_max_width_chars(10)
         self.queue_box.append(self.queue_label)
 
         btn_box.append(self.gen_button)
@@ -255,7 +256,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Current node label (inline with progress bar)
         self.current_node_label = Gtk.Label(
                 label="Ready", xalign=0.5)
-        self.current_node_label.set_size_request(150, -1)
+        self.current_node_label.set_width_chars(20)
+        self.current_node_label.set_max_width_chars(20)
         self.current_node_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.current_node_label.set_valign(Gtk.Align.CENTER)
         # progress_box.append(self.current_node_label)
