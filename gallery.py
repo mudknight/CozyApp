@@ -266,8 +266,21 @@ class GalleryPage(Gtk.ScrolledWindow):
     def _copy_to_clipboard(self, pixbuf):
         """Copy pixbuf to the system clipboard as an image."""
         texture = self._texture_from_pixbuf(pixbuf)
-        content = Gdk.ContentProvider.new_for_value(texture)
-        Gdk.Display.get_default().get_clipboard().set_content(content)
+
+        # Encode to PNG for maximum compatibility with other apps
+        success, buffer = pixbuf.save_to_bufferv("png", [], [])
+
+        if success:
+            gbytes = GLib.Bytes.new(buffer)
+            # Offer both the PNG bytes and the texture
+            content = Gdk.ContentProvider.new_union([
+                Gdk.ContentProvider.new_for_bytes("image/png", gbytes),
+                Gdk.ContentProvider.new_for_value(texture)
+            ])
+        else:
+            content = Gdk.ContentProvider.new_for_value(texture)
+
+        self.get_clipboard().set_content(content)
 
     def _save_single(self, pixbuf, anchor):
         """Show a file-save dialog for a single image."""

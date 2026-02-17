@@ -1786,9 +1786,23 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Copy the currently displayed preview image to the clipboard."""
         if not self.current_pixbuf:
             return
+
         texture = self._pixbuf_to_texture(self.current_pixbuf)
-        content = Gdk.ContentProvider.new_for_value(texture)
-        Gdk.Display.get_default().get_clipboard().set_content(content)
+
+        # Encode to PNG for maximum compatibility with other apps
+        success, buffer = self.current_pixbuf.save_to_bufferv("png", [], [])
+
+        if success:
+            gbytes = GLib.Bytes.new(buffer)
+            # Offer both the PNG bytes and the texture
+            content = Gdk.ContentProvider.new_union([
+                Gdk.ContentProvider.new_for_bytes("image/png", gbytes),
+                Gdk.ContentProvider.new_for_value(texture)
+            ])
+        else:
+            content = Gdk.ContentProvider.new_for_value(texture)
+
+        self.get_clipboard().set_content(content)
 
     def _preview_save(self):
         """Show a save-file dialog for the current preview image."""
