@@ -99,6 +99,10 @@ class ComfyApp(Adw.Application):
         return 0
 
     def on_activate(self, app):
+        # Add assets directory to icon theme search path
+        icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        icon_theme.add_search_path(os.path.join(os.path.dirname(__file__), "assets"))
+        
         self.win = ComfyWindow(application=app, workflow_file=self.workflow_file)
         self.win.present()
 
@@ -141,6 +145,13 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.preview_toggle = Gtk.ToggleButton(
             icon_name="view-reveal-symbolic", active=True)
         self.preview_toggle.connect("toggled", self.on_toggle_preview)
+
+        # Overflow menu button
+        self.menu_button = Gtk.MenuButton(
+            icon_name="open-menu-symbolic",
+            menu_model=self.create_overflow_menu()
+        )
+        self.header.pack_end(self.menu_button)
         self.header.pack_end(self.preview_toggle)
 
         self.toast_overlay = Adw.ToastOverlay()
@@ -273,8 +284,8 @@ class ComfyWindow(Adw.ApplicationWindow):
             vexpand=True,
             hexpand=True
         )
-        for side in ["top", "bottom", "start", "end"]:
-            getattr(picture_scroll, f"set_margin_{side}")(20)
+        # for side in ["top", "bottom", "start", "end"]:
+        #     getattr(picture_scroll, f"set_margin_{side}")(20)
         
         # Create overlay for magnifier
         self.picture_overlay = Gtk.Overlay()
@@ -337,6 +348,32 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         if self.workflow_file:
             self.load_workflow_file(self.workflow_file)
+
+    def create_overflow_menu(self):
+        """Create the overflow menu with about action."""
+        menu = Gio.Menu()
+        menu.append("About", "app.about")
+        
+        # Add the action to the application
+        action = Gio.SimpleAction.new("about", None)
+        action.connect("activate", self.on_show_about)
+        self.get_application().add_action(action)
+        
+        return menu
+
+    def on_show_about(self, action, param):
+        """Show the about dialog using Adw.AboutDialog."""
+        dialog = Adw.AboutDialog.new()
+        dialog.set_application_name("CozyApp")
+        dialog.set_developer_name("Your Name")
+        dialog.set_version("1.0.0")
+        dialog.set_application_icon("com.example.comfy_gen")
+        dialog.set_website("https://example.com")
+        dialog.set_issue_url("https://github.com/example/cozyapp/issues")
+        dialog.set_license_type(Gtk.License.MIT_X11)
+        dialog.set_comments("A simple GTK4 application with an about page.")
+        dialog.add_acknowledgement_section("Contributors", ["Contributor 1", "Contributor 2"])
+        dialog.present(self)
 
     def on_close_request(self, window):
         """Clean up resources before closing."""
@@ -611,6 +648,9 @@ class ComfyWindow(Adw.ApplicationWindow):
                 color: @accent_fg_color;
                 font-size: 10px;
                 font-family: monospace;
+            }
+            .about-image {
+                border-radius: 16px;
             }
         """
         css_provider.load_from_data(css_content, len(css_content))
