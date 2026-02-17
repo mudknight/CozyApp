@@ -23,7 +23,8 @@ from tag_completion import TagCompletion  # noqa
 
 
 def setup_language_manager():
-    """Set up the custom language definition for # comments before any GtkSource usage"""
+    """Set up the custom language definition for
+    # comments before any GtkSource usage"""
     lang_xml = '''<?xml version="1.0" encoding="UTF-8"?>
 <language id="prompt-tags" name="Prompt Tags" version="2.0" _section="Other">
   <metadata>
@@ -45,11 +46,13 @@ def setup_language_manager():
 </language>'''
 
     # Create a temporary language file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.lang', delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode='w', suffix='.lang', delete=False
+    ) as f:
         f.write(lang_xml)
         lang_file = f.name
 
-    # Create language manager and add our temp file BEFORE any languages are loaded
+    # Create language manager and add our file BEFORE any languages are loaded
     lang_manager = GtkSource.LanguageManager.get_default()
     lang_dirs = lang_manager.get_search_path()
     lang_dirs.append(os.path.dirname(lang_file))
@@ -194,9 +197,10 @@ class ComfyWindow(Adw.ApplicationWindow):
         style_box.append(Gtk.Label(label="Style", xalign=0))
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
         # self.style_dropdown.set_hexpand(True)
-        
+
         # Create factory for ellipsizing style dropdown with fixed 10 char width
         style_list_factory = Gtk.SignalListItemFactory()
+
         def setup_style_item(factory, list_item):
             label = Gtk.Label()
             label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -219,7 +223,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         style_button_factory.connect("setup", setup_style_item)
         style_button_factory.connect("bind", bind_style_item)
         self.style_dropdown.set_factory(style_button_factory)
-        
+
         # self.input_area.append(self.style_dropdown)
         style_box.append(self.style_dropdown)
 
@@ -227,12 +231,13 @@ class ComfyWindow(Adw.ApplicationWindow):
         style_box.append(Gtk.Label(label="Model", xalign=0, margin_start=10))
         self.model_dropdown = Gtk.DropDown.new_from_strings([])
         self.model_dropdown.set_hexpand(True)
-        
+
         # Allow the dropdown to shrink below its natural size
         self.model_dropdown.set_size_request(50, -1)
-        
+
         # Create factory for ellipsizing dropdown items
         list_factory = Gtk.SignalListItemFactory()
+
         def setup_list_item(factory, list_item):
             label = Gtk.Label()
             label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -254,7 +259,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         button_factory.connect("setup", setup_list_item)
         button_factory.connect("bind", bind_list_item)
         self.model_dropdown.set_factory(button_factory)
-        
+
         style_box.append(self.model_dropdown)
 
         self.input_area.append(style_box)
@@ -313,13 +318,14 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         # Current node label (inline with progress bar)
         self.current_node_label = Gtk.Label(
-                label="Ready", xalign=0.5)
+            label="Ready", xalign=0.5)
         self.current_node_label.set_width_chars(20)
         self.current_node_label.set_max_width_chars(20)
         self.current_node_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.current_node_label.set_valign(Gtk.Align.CENTER)
 
-        self.queue_box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+        self.queue_box.append(
+            Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         self.queue_box.append(self.current_node_label)
 
         # Order elements in button box
@@ -332,7 +338,8 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         # Bottom section: Debug (Split vertically from inputs)
         self.debug_revealer = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.SLIDE_UP, reveal_child=False, vexpand=False)
+            transition_type=Gtk.RevealerTransitionType.SLIDE_UP,
+            reveal_child=False, vexpand=False)
         self.sidebar_vbox.append(self.debug_revealer)
 
         debug_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -342,8 +349,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         debug_box.set_margin_bottom(20)
 
         self.debug_buffer = Gtk.TextBuffer()
-        debug_view = Gtk.TextView(buffer=self.debug_buffer, editable=False,
-                                  wrap_mode=Gtk.WrapMode.CHAR, css_classes=["debug-text"])
+        debug_view = Gtk.TextView(
+            buffer=self.debug_buffer, editable=False,
+            wrap_mode=Gtk.WrapMode.CHAR, css_classes=["debug-text"])
         debug_box.append(self.create_scrolled(debug_view))
         self.debug_revealer.set_child(debug_box)
 
