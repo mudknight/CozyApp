@@ -1222,15 +1222,50 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.update_queue_label()
         self.log("Queue processing complete")
 
+    def _topo_sort(self, workflow_data):
+        """
+        Return node IDs in topological execution order by walking
+        the dependency graph.
+        """
+        # Build adjacency: node -> set of nodes it depends on
+        deps = {nid: set() for nid in workflow_data}
+        for nid, node in workflow_data.items():
+            for val in node.get('inputs', {}).values():
+                if isinstance(val, list) and len(val) == 2:
+                    parent = str(val[0])
+                    # Strip sub-node suffixes (e.g. "207:206" -> "207:206")
+                    if parent in workflow_data:
+                        deps[nid].add(parent)
+
+        order = []
+        visited = set()
+
+        def visit(nid):
+            if nid in visited:
+                return
+            visited.add(nid)
+            for parent in deps.get(nid, []):
+                visit(parent)
+            order.append(nid)
+
+        for nid in workflow_data:
+            visit(nid)
+
+        return order
+
     def generate_logic(self, workflow_data):
         """
         Execute a single generation request.
         """
         ws = websocket.WebSocket()
         try:
-            # Calculate total nodes for progress tracking
-            total_nodes = len(workflow_data)
-            nodes_completed = 0
+            # Build execution order for progress tracking
+            exec_order = self._topo_sort(workflow_data)
+            # Map node_id -> index in execution order
+            node_index = {nid: i for i, nid in enumerate(exec_order)}
+            total_nodes = len(exec_order)
+            # Tracks index of currently executing node
+            current_index = 0
 
             ws.connect(f"ws://{SERVER_ADDRESS}/ws?clientId={CLIENT_ID}")
             payload = {"prompt": workflow_data, "client_id": CLIENT_ID}
@@ -1249,24 +1284,40 @@ class ComfyWindow(Adw.ApplicationWindow):
                     continue
 
                 msg = json.loads(out)
-                if msg['type'] == 'progress':
-                    # Calculate overall progress:
-                    # (completed nodes / total) + (current node progress
-                    # / total)
+                if msg['type'] == 'executing':
+                    node_id = msg['data']['node']
+                    if node_id is None:
+                        break
+                    current_index = node_index.get(node_id, current_index)
+                    node_class = workflow_data.get(
+                        node_id, {}
+                    ).get('class_type', 'Unknown')
+                    GLib.idle_add(self.set_current_node, node_class)
+                    # Snap bar to start of this node's slice
+                    GLib.idle_add(
+                        self.progress_bar.set_fraction,
+                        current_index / total_nodes
+                    )
+
+                elif msg['type'] == 'progress':
+                    # Fractional progress within this node's slice
                     node_progress = (
                         msg['data']['value'] / msg['data']['max']
                     )
-                    overall_progress = (
-                        (nodes_completed / total_nodes) +
-                        (node_progress / total_nodes)
+                    overall = (
+                        current_index / total_nodes +
+                        node_progress / total_nodes
                     )
                     GLib.idle_add(
-                        self.progress_bar.set_fraction, overall_progress
+                        self.progress_bar.set_fraction, overall
                     )
 
-                if msg['type'] == 'executed':
-                    # Node completed, increment counter
-                    nodes_completed += 1
+                elif msg['type'] == 'executed':
+                    # Snap bar to end of this node's slice
+                    GLib.idle_add(
+                        self.progress_bar.set_fraction,
+                        (current_index + 1) / total_nodes
+                    )
 
                     if 'images' in msg['data']['output']:
                         img = msg['data']['output']['images'][0]
@@ -1276,16 +1327,6 @@ class ComfyWindow(Adw.ApplicationWindow):
                         img_data = img_resp.content
                         img_resp.close()
                         GLib.idle_add(self.update_image, img_data)
-
-                if msg['type'] == 'executing':
-                    node_id = msg['data']['node']
-                    if node_id is None:
-                        break
-                    # Get node class type from workflow
-                    node_class = workflow_data.get(
-                        node_id, {}
-                    ).get('class_type', 'Unknown')
-                    GLib.idle_add(self.set_current_node, node_class)
 
             hist_resp = requests.get(
                 f"http://{SERVER_ADDRESS}/history/{prompt_id}",
