@@ -294,6 +294,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.stop_button = Gtk.Button(
             label="Stop", css_classes=["destructive-action"])
         self.stop_button.connect("clicked", self.on_stop_clicked)
+        self.stop_button.set_sensitive(False)
 
         # Queue label styled like a button
         self.queue_box = Gtk.Box(
@@ -1265,6 +1266,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         Process generation requests from the queue.
         """
         self.is_processing = True
+        GLib.idle_add(self.stop_button.set_sensitive, True)
 
         while not self.gen_queue.empty():
             try:
@@ -1277,6 +1279,7 @@ class ComfyWindow(Adw.ApplicationWindow):
                 self.log(f"Queue processing error: {e}")
 
         self.is_processing = False
+        GLib.idle_add(self.stop_button.set_sensitive, False)
         self.update_queue_label()
         self.log("Queue processing complete")
 
