@@ -744,7 +744,10 @@ class ComfyWindow(Adw.ApplicationWindow):
             buffer.get_end_iter(),
             False
         )
-        suggestions = self.tag_completion.get_completions(text)
+        cursor_pos = iter_cursor.get_offset()
+        suggestions = self.tag_completion.get_completions(
+            text, cursor_pos
+        )
 
         if suggestions:
             self.tag_completion.show_popup(textview, suggestions)

@@ -176,21 +176,35 @@ class TagCompletion:
         except Exception as e:
             self.log(f"Error loading LoRAs: {e}")
 
-    def get_completions(self, text):
+    def get_completions(self, text, cursor_pos=None):
         """
         Get tag completions for the current text.
 
         Args:
             text: Full text buffer content
+            cursor_pos: Cursor position (character offset) in text
 
         Returns:
             List of matching tag suggestions (max 10)
         """
-        # Split by commas to preserve multi-word tags
-        tags = text.split(',')
-        if not tags:
-            return []
-        current = tags[-1].strip()
+        # If cursor position provided, extract current tag at that position
+        if cursor_pos is not None:
+            # Find start of current tag (go back to last comma or newline)
+            tag_start = cursor_pos
+            while tag_start > 0:
+                if text[tag_start - 1] in ',\n':
+                    break
+                tag_start -= 1
+
+            # Extract text from tag start to cursor
+            current = text[tag_start:cursor_pos].strip()
+        else:
+            # Fallback to old behavior for backward compatibility
+            tags = text.split(',')
+            if not tags:
+                return []
+            current = tags[-1].strip()
+
         if len(current) < 2:
             return []
 
@@ -541,12 +555,15 @@ class TagCompletion:
                 self.completion_popup.is_visible()):
             if keyval == Gdk.KEY_Tab and self.sorted_tags:
                 buffer = textview.get_buffer()
+                cursor = buffer.get_insert()
+                iter_cursor = buffer.get_iter_at_mark(cursor)
                 text = buffer.get_text(
                     buffer.get_start_iter(),
                     buffer.get_end_iter(),
                     False
                 )
-                suggestions = self.get_completions(text)
+                cursor_pos = iter_cursor.get_offset()
+                suggestions = self.get_completions(text, cursor_pos)
                 if suggestions:
                     self.show_popup(textview, suggestions)
                     return True
