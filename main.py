@@ -18,8 +18,8 @@ gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('GtkSource', '5')
 gi.require_version('Pango', '1.0')
 
-from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource, Pango
-from tag_completion import TagCompletion
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource, Pango  # noqa
+from tag_completion import TagCompletion  # noqa
 
 
 def setup_language_manager():
@@ -43,18 +43,18 @@ def setup_language_manager():
     </context>
   </definitions>
 </language>'''
-    
+
     # Create a temporary language file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.lang', delete=False) as f:
         f.write(lang_xml)
         lang_file = f.name
-    
+
     # Create language manager and add our temp file BEFORE any languages are loaded
     lang_manager = GtkSource.LanguageManager.get_default()
     lang_dirs = lang_manager.get_search_path()
     lang_dirs.append(os.path.dirname(lang_file))
     lang_manager.set_search_path(lang_dirs)
-    
+
     return lang_file
 
 
@@ -101,9 +101,11 @@ class ComfyApp(Adw.Application):
     def on_activate(self, app):
         # Add assets directory to icon theme search path
         icon_theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-        icon_theme.add_search_path(os.path.join(os.path.dirname(__file__), "assets"))
-        
-        self.win = ComfyWindow(application=app, workflow_file=self.workflow_file)
+        icon_theme.add_search_path(os.path.join(
+            os.path.dirname(__file__), "assets"))
+
+        self.win = ComfyWindow(
+            application=app, workflow_file=self.workflow_file)
         self.win.present()
 
 
@@ -187,25 +189,27 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.style_dropdown.set_hexpand(True)
         # self.input_area.append(self.style_dropdown)
         style_box.append(self.style_dropdown)
-        
+
         # Model selector
         style_box.append(Gtk.Label(label="Model", xalign=0, margin_start=10))
         self.model_dropdown = Gtk.DropDown.new_from_strings([])
         self.model_dropdown.set_hexpand(True)
         style_box.append(self.model_dropdown)
-        
+
         self.input_area.append(style_box)
 
         self.pos_buffer = GtkSource.Buffer()
         self.setup_comment_highlighting(self.pos_buffer)
         self.input_area.append(Gtk.Label(label="Positive Prompt", xalign=0))
-        pos_scrolled, self.pos_textview = self.create_scrolled_textview(self.pos_buffer)
+        pos_scrolled, self.pos_textview = self.create_scrolled_textview(
+            self.pos_buffer)
         self.input_area.append(pos_scrolled)
 
         self.neg_buffer = GtkSource.Buffer()
         self.setup_comment_highlighting(self.neg_buffer)
         self.input_area.append(Gtk.Label(label="Negative Prompt", xalign=0))
-        neg_scrolled, self.neg_textview = self.create_scrolled_textview(self.neg_buffer)
+        neg_scrolled, self.neg_textview = self.create_scrolled_textview(
+            self.neg_buffer)
         self.input_area.append(neg_scrolled)
 
         # self.input_area.append(Gtk.Label(label="Seed", xalign=0))
@@ -223,41 +227,48 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.gen_button = Gtk.Button(label="Generate", css_classes=[
-                                     "suggested-action"], hexpand=True)
+                                     "suggested-action"])
         self.gen_button.connect("clicked", self.on_generate_clicked)
         self.stop_button = Gtk.Button(
             label="Stop", css_classes=["destructive-action"])
         self.stop_button.connect("clicked", self.on_stop_clicked)
-        
+
         # Queue label styled like a button
+        self.queue_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=5,
+            css_classes=["queue-badge"])
         self.queue_label = Gtk.Label(
-            label="Queue: 0", xalign=0.5, css_classes=["queue-badge"]
+            label="Queue: 0", xalign=0.5
         )
-        
+        self.queue_label.set_size_request(100, -1)
+        self.queue_box.append(self.queue_label)
+
         btn_box.append(self.gen_button)
         btn_box.append(self.stop_button)
-        btn_box.append(self.queue_label)
-        self.input_area.append(btn_box)
 
-        progress_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=8
-        )
+        # progress_box = Gtk.Box(
+        #     orientation=Gtk.Orientation.HORIZONTAL, spacing=8
+        # )
         self.progress_bar = Gtk.ProgressBar(hexpand=True)
         self.progress_bar.set_valign(Gtk.Align.CENTER)
 
         # Current node label (inline with progress bar)
         self.current_node_label = Gtk.Label(
-            label="Ready",
-            xalign=0,
-            css_classes=["current-node-label"]
-        )
-        self.current_node_label.set_size_request(200, -1)
+                label="Ready", xalign=0.5)
+        self.current_node_label.set_size_request(150, -1)
         self.current_node_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.current_node_label.set_valign(Gtk.Align.CENTER)
-        progress_box.append(self.current_node_label)
-        progress_box.append(self.progress_bar)
+        # progress_box.append(self.current_node_label)
+        # progress_box.append(self.progress_bar)
 
-        self.input_area.append(progress_box)
+        self.queue_box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+        self.queue_box.append(self.current_node_label)
+        btn_box.append(self.queue_box)
+        # btn_box.append(self.current_node_label)
+        btn_box.append(self.progress_bar)
+
+        self.input_area.append(btn_box)
+        # self.input_area.append(progress_box)
 
         # Bottom section: Debug (Split vertically from inputs)
         self.debug_revealer = Gtk.Revealer(
@@ -288,7 +299,7 @@ class ComfyWindow(Adw.ApplicationWindow):
             orientation=Gtk.Orientation.VERTICAL,
             css_classes=["preview-panel"]
         )
-        
+
         # ScrolledWindow that doesn't resize based on child
         picture_scroll = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -300,16 +311,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         # for side in ["top", "bottom", "start", "end"]:
         #     getattr(picture_scroll, f"set_margin_{side}")(20)
-        
+
         # Create overlay for magnifier
         self.picture_overlay = Gtk.Overlay()
-        
+
         self.picture = Gtk.Picture(
             content_fit=Gtk.ContentFit.CONTAIN,
             can_shrink=True
         )
         self.picture_overlay.set_child(self.picture)
-        
+
         # Create magnifier frame
         self.magnifier_frame = Gtk.Frame(
             css_classes=['magnifier-frame']
@@ -320,15 +331,15 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         # Make magnifier non-interactive so it doesn't block mouse events
         self.magnifier_frame.set_can_target(False)
-        
+
         self.magnifier_picture = Gtk.Picture(
             content_fit=Gtk.ContentFit.FILL
         )
         self.magnifier_picture.set_can_target(False)
         self.magnifier_frame.set_child(self.magnifier_picture)
-        
+
         self.picture_overlay.add_overlay(self.magnifier_frame)
-        
+
         picture_scroll.set_child(self.picture_overlay)
         preview_panel.append(picture_scroll)
         self.preview_revealer.set_child(preview_panel)
@@ -339,7 +350,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         motion_controller.connect("leave", self.on_picture_leave)
         motion_controller.connect("enter", self.on_picture_enter)
         self.picture.add_controller(motion_controller)
-        
+
         # Add scroll controller for magnifier size adjustment
         scroll_controller = Gtk.EventControllerScroll()
         scroll_controller.set_flags(
@@ -347,7 +358,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         scroll_controller.connect("scroll", self.on_picture_scroll)
         self.picture.add_controller(scroll_controller)
-        
+
         # Store default cursor
         self.default_cursor = None
         self.crosshair_cursor = Gdk.Cursor.new_from_name("crosshair")
@@ -367,12 +378,12 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Create the overflow menu with about action."""
         menu = Gio.Menu()
         menu.append("About", "app.about")
-        
+
         # Add the action to the application
         action = Gio.SimpleAction.new("about", None)
         action.connect("activate", self.on_show_about)
         self.get_application().add_action(action)
-        
+
         return menu
 
     def on_show_about(self, action, param):
@@ -386,7 +397,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         dialog.set_issue_url("https://github.com/example/cozyapp/issues")
         dialog.set_license_type(Gtk.License.MIT_X11)
         dialog.set_comments("A simple GTK4 application with an about page.")
-        dialog.add_acknowledgement_section("Contributors", ["Contributor 1", "Contributor 2"])
+        dialog.add_acknowledgement_section(
+            "Contributors", ["Contributor 1", "Contributor 2"])
         dialog.present(self)
 
     def on_close_request(self, window):
@@ -630,7 +642,6 @@ class ComfyWindow(Adw.ApplicationWindow):
             .preview-panel { background-color: @card_bg_color; border-left: none; }
             .view { border: none; border-radius: 8px; background-color: @view_bg_color; }
             .debug-text { font-family: monospace; font-size: 11px; opacity: 0.8; }
-            separator { background-color: transparent; }
             gutter { background-color: alpha(@view_fg_color, 0.05); border-right: 1px solid alpha(@view_fg_color, 0.1); }
             .magnifier-frame {
                 border: 2px solid alpha(currentColor, 0.3);
@@ -639,7 +650,6 @@ class ComfyWindow(Adw.ApplicationWindow):
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
             }
             .queue-badge {
-                padding: 6px 12px;
                 border-radius: 6px;
                 background-color: alpha(@view_fg_color, 0.1);
                 border: 1px solid alpha(@view_fg_color, 0.15);
@@ -759,7 +769,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         textview.set_vexpand(True)
         textview.set_show_line_numbers(True)
         textview.set_highlight_current_line(False)
-        
+
         # Set style scheme based on system dark/light mode
         style_manager = GtkSource.StyleSchemeManager.get_default()
         adw_style_manager = Adw.StyleManager.get_default()
@@ -769,19 +779,23 @@ class ComfyWindow(Adw.ApplicationWindow):
             style_scheme = style_manager.get_scheme("Adwaita")
         if style_scheme:
             buffer.set_style_scheme(style_scheme)
-        
+
         # Track completion state for this textview
         textview.completion_active = False
         textview.completion_debounce_id = None
-        
+
         key_controller = Gtk.EventControllerKey()
         key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        key_controller.connect("key-pressed", lambda controller, keyval, keycode, state: self.on_textview_key_press(textview, keyval, keycode, state))
+        key_controller.connect(
+            "key-pressed", lambda controller, keyval, keycode,
+            state: self.on_textview_key_press(
+                textview, keyval, keycode, state))
         textview.add_controller(key_controller)
-        
+
         # Connect to buffer changes for auto-completion
-        buffer.connect("changed", lambda buf: self.on_textview_changed(textview))
-        
+        buffer.connect(
+            "changed", lambda buf: self.on_textview_changed(textview))
+
         scrolled = Gtk.ScrolledWindow(
             child=textview, propagate_natural_height=False, vexpand=True)
         scrolled.add_css_class("view")
@@ -792,7 +806,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         Toggle preview panel visibility.
         """
         is_active = btn.get_active()
-        
+
         if is_active:
             # Show: enable expansion then reveal
             self.preview_revealer.set_hexpand(True)
@@ -873,27 +887,27 @@ class ComfyWindow(Adw.ApplicationWindow):
         Weight of 1.0 removes the syntax entirely.
         """
         buffer = textview.get_buffer()
-        
+
         # Check if text is selected
         selection = buffer.get_selection_bounds()
         if selection:
             # Handle selected text
             iter_start, iter_end = selection
             selected_text = buffer.get_text(iter_start, iter_end, False)
-            
+
             if not selected_text.strip():
                 return
-            
+
             # Check if selection already has weight: (content:1.1)
             weight_pattern = r'^\((.+?):(\d+\.?\d*)\)$'
             match = re.match(weight_pattern, selected_text)
-            
+
             if match:
                 content = match.group(1)
                 current_weight = float(match.group(2))
                 new_weight = current_weight + (0.1 if increase else -0.1)
                 new_weight = max(0.1, min(2.0, new_weight))
-                
+
                 # If weight is 1.0, remove the syntax
                 if abs(new_weight - 1.0) < 0.01:
                     new_text = content
@@ -901,20 +915,20 @@ class ComfyWindow(Adw.ApplicationWindow):
                     new_text = f"({content}:{new_weight:.1f})"
             else:
                 new_weight = 1.1 if increase else 0.9
-                
+
                 # If weight would be 1.0, don't add syntax
                 if abs(new_weight - 1.0) < 0.01:
                     new_text = selected_text
                 else:
                     new_text = f"({selected_text}:{new_weight:.1f})"
-            
+
             # Get the start offset before deletion
             start_offset = iter_start.get_offset()
-            
+
             # Replace the selection
             buffer.delete(iter_start, iter_end)
             buffer.insert(iter_start, new_text)
-            
+
             # Reselect the new text
             new_start = buffer.get_iter_at_offset(start_offset)
             new_end = buffer.get_iter_at_offset(
@@ -922,15 +936,15 @@ class ComfyWindow(Adw.ApplicationWindow):
             )
             buffer.select_range(new_start, new_end)
             return
-        
+
         # No selection - handle single tag under cursor
         cursor = buffer.get_insert()
         iter_cursor = buffer.get_iter_at_mark(cursor)
-        
+
         # Find start and end of current tag (comma-separated)
         iter_start = iter_cursor.copy()
         iter_end = iter_cursor.copy()
-        
+
         # Move start backward to comma or line start
         leading_space = ""
         while not iter_start.starts_line():
@@ -943,30 +957,30 @@ class ComfyWindow(Adw.ApplicationWindow):
                     leading_space += ' '
                     iter_start.forward_char()
                 break
-        
+
         # Move end forward to comma or line end
         while not iter_end.ends_line():
             char = iter_end.get_char()
             if char == ',':
                 break
             iter_end.forward_char()
-        
+
         # Get the tag text (without leading space)
         tag_text = buffer.get_text(iter_start, iter_end, False).strip()
-        
+
         if not tag_text:
             return
-        
+
         # Check if tag already has weight: (tag text:1.1)
         weight_pattern = r'^\((.+?):(\d+\.?\d*)\)$'
         match = re.match(weight_pattern, tag_text)
-        
+
         if match:
             tag_content = match.group(1)
             current_weight = float(match.group(2))
             new_weight = current_weight + (0.1 if increase else -0.1)
             new_weight = max(0.1, min(2.0, new_weight))
-            
+
             # If weight is 1.0, remove the syntax
             if abs(new_weight - 1.0) < 0.01:
                 new_tag = tag_content
@@ -974,13 +988,13 @@ class ComfyWindow(Adw.ApplicationWindow):
                 new_tag = f"({tag_content}:{new_weight:.1f})"
         else:
             new_weight = 1.1 if increase else 0.9
-            
+
             # If weight would be 1.0, don't add syntax
             if abs(new_weight - 1.0) < 0.01:
                 new_tag = tag_text
             else:
                 new_tag = f"({tag_text}:{new_weight:.1f})"
-        
+
         # Move iter_start back to include leading space
         iter_start_with_space = iter_cursor.copy()
         while not iter_start_with_space.starts_line():
@@ -989,7 +1003,7 @@ class ComfyWindow(Adw.ApplicationWindow):
             if char == ',':
                 iter_start_with_space.forward_char()
                 break
-        
+
         # Replace the tag (preserving leading space)
         buffer.delete(iter_start_with_space, iter_end)
         buffer.insert(iter_start_with_space, leading_space + new_tag)
@@ -1135,11 +1149,11 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Update queue label text and styling."""
         self.queue_label.set_text(text)
         if count > 0:
-            if not self.queue_label.has_css_class('queue-active'):
-                self.queue_label.add_css_class('queue-active')
+            if not self.queue_box.has_css_class('queue-active'):
+                self.queue_box.add_css_class('queue-active')
         else:
-            if self.queue_label.has_css_class('queue-active'):
-                self.queue_label.remove_css_class('queue-active')
+            if self.queue_box.has_css_class('queue-active'):
+                self.queue_box.remove_css_class('queue-active')
 
     def on_stop_clicked(self, _):
         try:
@@ -1396,6 +1410,6 @@ class ComfyWindow(Adw.ApplicationWindow):
 
 if __name__ == "__main__":
     # Use Cairo renderer to avoid Vulkan swapchain warnings
-    os.environ['GSK_RENDERER'] = 'cairo'
+    os.environ['GSK_RENDERER'] = 'gl'
     app = ComfyApp()
     app.run(sys.argv)
