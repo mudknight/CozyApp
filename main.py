@@ -10,7 +10,7 @@ import csv
 import gi
 import tempfile
 import os
-import queue
+import datetime
 import re
 
 gi.require_version('Gtk', '4.0')
@@ -126,7 +126,11 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.model_list = []
         self.workflow_data = None
         self.tag_completion = TagCompletion(self.log)
-        self.gen_queue = queue.Queue()
+        # Active job list; each entry is a dict with keys:
+        # id, workflow, added_at, status ('pending'/'processing'), row
+        self.job_list = []
+        self.job_list_lock = threading.Lock()
+        self.current_job_id = None
         self.is_processing = False
         self.debounce_timers = []
         self.current_pixbuf = None
@@ -334,20 +338,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.batch_entry.set_tooltip_text("Number of images to queue")
         self.batch_entry.set_width_chars(3)
 
-        # Queue label styled like a button
-        self.queue_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=5,
-            css_classes=["queue-badge"])
-        self.queue_label = Gtk.Label(
-            label="Queue: 0", xalign=0.5
-        )
-        self.queue_label.set_width_chars(10)
-        self.queue_label.set_max_width_chars(10)
-        self.queue_box.append(self.queue_label)
-
-        # progress_box = Gtk.Box(
-        #     orientation=Gtk.Orientation.HORIZONTAL, spacing=8
-        # )
         self.progress_bar = Gtk.ProgressBar(hexpand=True)
         self.progress_bar.set_valign(Gtk.Align.CENTER)
 
@@ -359,9 +349,60 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.current_node_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.current_node_label.set_valign(Gtk.Align.CENTER)
 
-        self.queue_box.append(
+        # Inner content of the queue status button
+        queue_btn_content = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        self.queue_label = Gtk.Label(label="Queue: 0", xalign=0.5)
+        self.queue_label.set_width_chars(10)
+        self.queue_label.set_max_width_chars(10)
+        queue_btn_content.append(self.queue_label)
+        queue_btn_content.append(
             Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
-        self.queue_box.append(self.current_node_label)
+        queue_btn_content.append(self.current_node_label)
+
+        # Listbox inside the popover, updated incrementally
+        self._job_listbox = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.NONE,
+            css_classes=['boxed-list']
+        )
+        self._job_listbox.set_placeholder(Gtk.Label(
+            label='No jobs queued',
+            css_classes=['dim-label'],
+            margin_top=12,
+            margin_bottom=12
+        ))
+        popover_scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            propagate_natural_height=True,
+            min_content_height=0,
+            max_content_height=300
+        )
+        popover_scroll.set_child(self._job_listbox)
+
+        popover_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        popover_box.set_margin_top(8)
+        popover_box.set_margin_bottom(8)
+        popover_box.set_margin_start(8)
+        popover_box.set_margin_end(8)
+        popover_box.set_size_request(280, -1)
+        popover_box.append(
+            Gtk.Label(label='Queued Jobs', css_classes=['heading'])
+        )
+        popover_box.append(popover_scroll)
+
+        self._queue_popover = Gtk.Popover()
+        self._queue_popover.set_child(popover_box)
+        self._queue_popover.set_autohide(True)
+
+        # MenuButton: shows queue status label and opens the job popover
+        self.queue_box = Gtk.MenuButton(
+            popover=self._queue_popover,
+            css_classes=['queue-badge']
+        )
+        self.queue_box.set_child(queue_btn_content)
+        self.queue_box.set_direction(Gtk.ArrowType.NONE)
 
         # Wrap Queue button and batch spinner together as a joined widget
         self.queue_group = Gtk.Box(
@@ -825,6 +866,10 @@ class ComfyWindow(Adw.ApplicationWindow):
                 border-top-left-radius: 0;
                 border-bottom-left-radius: 0;
                 border-left-width: 0;
+            }
+            /* Currently processing job row in the queue popover */
+            .job-processing {
+                background-color: alpha(@accent_bg_color, 0.1);
             }
         """
         css_provider.load_from_data(css_content, len(css_content))
@@ -1297,9 +1342,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         """
         Update the queue status label.
         """
-        queue_size = self.gen_queue.qsize()
-        # Include currently processing image in count
-        total_count = queue_size + (1 if self.is_processing else 0)
+        with self.job_list_lock:
+            total_count = len(self.job_list)
         text = f"Queue: {total_count}"
         GLib.idle_add(self._update_queue_label_ui, text, total_count)
 
@@ -1312,6 +1356,76 @@ class ComfyWindow(Adw.ApplicationWindow):
         else:
             if self.queue_box.has_css_class('queue-active'):
                 self.queue_box.remove_css_class('queue-active')
+
+    def _add_job_row(self, job):
+        """Create and prepend a row for job into the queue popover."""
+        row_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            margin_top=6,
+            margin_bottom=6,
+            margin_start=6,
+            margin_end=6
+        )
+        time_str = job['added_at'].strftime('%H:%M:%S')
+        time_label = Gtk.Label(
+            label=time_str, hexpand=True, xalign=0
+        )
+        row_box.append(time_label)
+
+        cancel_btn = Gtk.Button(
+            icon_name='window-close-symbolic',
+            css_classes=['flat', 'circular'],
+            valign=Gtk.Align.CENTER
+        )
+        cancel_btn.connect('clicked', lambda b: self._cancel_job(job))
+        row_box.append(cancel_btn)
+
+        row = Gtk.ListBoxRow()
+        row.set_child(row_box)
+        job['row'] = row
+
+        # Prepend so the newest job appears at the top
+        self._job_listbox.prepend(row)
+        row.show()
+        return False
+
+    def _remove_job_row_widget(self, job):
+        """Remove a job's row from the queue popover listbox."""
+        if job.get('row'):
+            self._job_listbox.remove(job['row'])
+        return False
+
+    def _mark_job_processing(self, job):
+        """Visually distinguish the row that is currently processing."""
+        if job.get('row'):
+            job['row'].add_css_class('job-processing')
+        return False
+
+    def _cancel_job(self, job):
+        """
+        Cancel a pending job or interrupt the currently processing one.
+
+        Called on the main thread from the row's X button.
+        """
+        with self.job_list_lock:
+            status = job['status']
+            if status == 'pending':
+                job['status'] = 'cancelled'
+
+        if status == 'processing':
+            # Row is removed when the interrupted job finishes
+            self.on_stop_clicked(None)
+        else:
+            # Remove from list and popover immediately
+            if job.get('row'):
+                self._job_listbox.remove(job['row'])
+            with self.job_list_lock:
+                try:
+                    self.job_list.remove(job)
+                except ValueError:
+                    pass
+            self.update_queue_label()
 
     def on_stop_clicked(self, _):
         try:
@@ -1386,12 +1500,22 @@ class ComfyWindow(Adw.ApplicationWindow):
                     if model:
                         node["inputs"]["ckpt_name"] = model
 
-            self.gen_queue.put(workflow_copy)
+            job = {
+                'id': str(uuid.uuid4()),
+                'workflow': workflow_copy,
+                'added_at': datetime.datetime.now(),
+                'status': 'pending',
+                'row': None,
+            }
+            with self.job_list_lock:
+                self.job_list.append(job)
+            # Row must be created on the main thread; we are on it here
+            self._add_job_row(job)
 
         self.update_queue_label()
         self.log(
             f"Queued {batch_count} item(s) "
-            f"(queue size: {self.gen_queue.qsize()})"
+            f"(queue size: {len(self.job_list)})"
         )
 
         if not self.is_processing:
@@ -1401,20 +1525,41 @@ class ComfyWindow(Adw.ApplicationWindow):
 
     def process_queue(self):
         """
-        Process generation requests from the queue.
+        Process pending jobs from the job list sequentially.
         """
         self.is_processing = True
         GLib.idle_add(self.stop_button.set_sensitive, True)
 
-        while not self.gen_queue.empty():
+        while True:
+            # Find the next pending job (oldest = lowest index)
+            with self.job_list_lock:
+                job = None
+                for j in self.job_list:
+                    if j['status'] == 'pending':
+                        j['status'] = 'processing'
+                        self.current_job_id = j['id']
+                        job = j
+                        break
+
+            if job is None:
+                break
+
+            GLib.idle_add(self._mark_job_processing, job)
+            self.update_queue_label()
+            self.log("Processing queued item...")
             try:
-                workflow_data = self.gen_queue.get()
-                self.update_queue_label()
-                self.log("Processing queued item...")
-                self.generate_logic(workflow_data)
-                self.gen_queue.task_done()
+                self.generate_logic(job['workflow'])
             except Exception as e:
                 self.log(f"Queue processing error: {e}")
+
+            # Remove completed/interrupted job from list and popover
+            with self.job_list_lock:
+                try:
+                    self.job_list.remove(job)
+                except ValueError:
+                    pass
+                self.current_job_id = None
+            GLib.idle_add(self._remove_job_row_widget, job)
 
         self.is_processing = False
         GLib.idle_add(self.stop_button.set_sensitive, False)
