@@ -179,9 +179,13 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.input_area.set_margin_bottom(10)
         self.sidebar_vbox.append(self.input_area)
 
-        self.input_area.append(Gtk.Label(label="Style", xalign=0))
+        style_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        # self.input_area.append(Gtk.Label(label="Style", xalign=0))
+        style_box.append(Gtk.Label(label="Style", xalign=0))
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
-        self.input_area.append(self.style_dropdown)
+        # self.input_area.append(self.style_dropdown)
+        style_box.append(self.style_dropdown)
+        self.input_area.append(style_box)
 
         self.pos_buffer = GtkSource.Buffer()
         self.setup_comment_highlighting(self.pos_buffer)
@@ -195,8 +199,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         neg_scrolled, self.neg_textview = self.create_scrolled_textview(self.neg_buffer)
         self.input_area.append(neg_scrolled)
 
-        self.input_area.append(Gtk.Label(label="Seed", xalign=0))
+        # self.input_area.append(Gtk.Label(label="Seed", xalign=0))
         seed_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        seed_box.append(Gtk.Label(label="Seed", xalign=0))
         self.seed_adj = Gtk.Adjustment(
             value=0, lower=0, upper=2**64-1, step_increment=1)
         self.seed_entry = Gtk.SpinButton(
