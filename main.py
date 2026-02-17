@@ -21,6 +21,7 @@ gi.require_version('Pango', '1.0')
 
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource, Pango  # noqa
 from tag_completion import TagCompletion  # noqa
+from gallery import GalleryPage  # noqa
 
 
 def setup_language_manager():
@@ -129,6 +130,10 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.is_processing = False
         self.debounce_timers = []
         self.current_pixbuf = None
+        # Last completed generation image
+        self.gen_pixbuf = None
+        # Currently selected gallery image
+        self.gallery_selected_pixbuf = None
         self.magnifier_size = 200
         self.magnifier_enabled = False
         self.last_cursor_x = 0
@@ -163,14 +168,37 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.header.pack_end(self.preview_toggle)
         self.header.pack_end(self.magnifier_toggle)
 
+        # View stack for Generate / Gallery tabs
+        self.view_stack = Adw.ViewStack()
+
+        # View switcher in the header bar title area
+        switcher = Adw.ViewSwitcher(
+            stack=self.view_stack,
+            policy=Adw.ViewSwitcherPolicy.WIDE
+        )
+        self.header.set_title_widget(switcher)
+
+        # Outer box: [ ViewStack (Left) | Preview panel (Right) ]
+        # Preview is shared across both tabs
+        self.outer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+
         self.toast_overlay = Adw.ToastOverlay()
+        self.toast_overlay.set_child(self.outer_box)
         self.main_box.append(self.toast_overlay)
 
-        # Horizontal layout: [ Sidebar (Left) | Preview (Right) ]
+        self.view_stack.set_hexpand(True)
+        self.outer_box.append(self.view_stack)
+
+        # Horizontal layout: sidebar only (preview lives in outer_box)
         self.content_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL
         )
-        self.toast_overlay.set_child(self.content_box)
+
+        # Add Generate page to the stack
+        self.view_stack.add_titled_with_icon(
+            self.content_box, 'generate', 'Generate',
+            'applications-graphics-symbolic'
+        )
 
         # --- Sidebar (Left Column) ---
         self.sidebar_vbox = Gtk.Box(
@@ -339,7 +367,7 @@ class ComfyWindow(Adw.ApplicationWindow):
             reveal_child=True,
             hexpand=True
         )
-        self.content_box.append(self.preview_revealer)
+        self.outer_box.append(self.preview_revealer)
 
         preview_panel = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
@@ -388,7 +416,21 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.picture_overlay.add_overlay(self.magnifier_frame)
 
         picture_scroll.set_child(self.picture_overlay)
-        preview_panel.append(picture_scroll)
+
+        # Stack switches between picture and a placeholder
+        self.preview_stack = Gtk.Stack(
+            vexpand=True, hexpand=True
+        )
+        self.preview_stack.add_named(picture_scroll, 'picture')
+        self.preview_placeholder = Adw.StatusPage(
+            icon_name='image-x-generic-symbolic',
+            title='No Image Selected',
+            description='Click a thumbnail to preview it here.'
+        )
+        self.preview_stack.add_named(
+            self.preview_placeholder, 'placeholder'
+        )
+        preview_panel.append(self.preview_stack)
         self.preview_revealer.set_child(preview_panel)
 
         # Add motion controller for magnifier
@@ -409,6 +451,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Store default cursor
         self.default_cursor = None
         self.crosshair_cursor = Gdk.Cursor.new_from_name("crosshair")
+
+        # Gallery page — clicking a thumbnail updates the shared preview
+        self.gallery = GalleryPage(on_view_image=self._view_gallery_image)
+        self.view_stack.add_titled_with_icon(
+            self.gallery.widget, 'gallery', 'Gallery',
+            'image-x-generic-symbolic'
+        )
+        self.view_stack.connect(
+            'notify::visible-child', self._on_tab_changed
+        )
 
         self.setup_keybinds()
 
@@ -685,6 +737,7 @@ class ComfyWindow(Adw.ApplicationWindow):
     def setup_css(self):
         css_provider = Gtk.CssProvider()
         css_content = """
+            .gallery-thumb { border-radius: 8px; }
             revealer { background-color: transparent; border: none; }
             .preview-panel { background-color: @card_bg_color; border-left: none; }
             .view { border: none; border-radius: 8px; background-color: @view_bg_color; }
@@ -1406,7 +1459,7 @@ class ComfyWindow(Adw.ApplicationWindow):
                     )
                     data = data_resp.content
                     data_resp.close()
-                    GLib.idle_add(self.update_image, data)
+                    GLib.idle_add(self.update_image_final, data)
                     break
         except Exception as e:
             self.log(f"Gen error: {e}")
@@ -1419,6 +1472,42 @@ class ComfyWindow(Adw.ApplicationWindow):
             # Hide current node label
             GLib.idle_add(self.set_current_node, None)
 
+    def _pixbuf_to_texture(self, pixbuf):
+        """Convert a GdkPixbuf to a Gdk.MemoryTexture."""
+        width = pixbuf.get_width()
+        height = pixbuf.get_height()
+        rowstride = pixbuf.get_rowstride()
+        has_alpha = pixbuf.get_has_alpha()
+        pixels = pixbuf.get_pixels()
+        gbytes = GLib.Bytes.new(pixels)
+        fmt = (
+            Gdk.MemoryFormat.R8G8B8A8 if has_alpha
+            else Gdk.MemoryFormat.R8G8B8
+        )
+        return Gdk.MemoryTexture.new(
+            width, height, fmt, gbytes, rowstride
+        )
+
+    def _show_pixbuf_in_preview(self, pixbuf):
+        """Display a pixbuf in the preview picture widget."""
+        self.current_pixbuf = pixbuf
+        self.picture.set_paintable(self._pixbuf_to_texture(pixbuf))
+        self.preview_stack.set_visible_child_name('picture')
+
+    def _on_tab_changed(self, stack, param):
+        """Restore the appropriate preview image when switching tabs."""
+        name = stack.get_visible_child_name()
+        if name == 'generate':
+            if self.gen_pixbuf:
+                self._show_pixbuf_in_preview(self.gen_pixbuf)
+            else:
+                self.preview_stack.set_visible_child_name('picture')
+        elif name == 'gallery':
+            if self.gallery_selected_pixbuf:
+                self._show_pixbuf_in_preview(self.gallery_selected_pixbuf)
+            else:
+                self.preview_stack.set_visible_child_name('placeholder')
+
     def update_image(self, data):
         loader = GdkPixbuf.PixbufLoader.new()
         try:
@@ -1426,33 +1515,31 @@ class ComfyWindow(Adw.ApplicationWindow):
             loader.close()
             pix = loader.get_pixbuf()
             if pix:
-                # Store pixbuf for magnifier
-                self.current_pixbuf = pix
-
-                # Use MemoryTexture instead of deprecated new_for_pixbuf
-                width = pix.get_width()
-                height = pix.get_height()
-                rowstride = pix.get_rowstride()
-                has_alpha = pix.get_has_alpha()
-                pixels = pix.get_pixels()
-
-                # Create GBytes from pixel data
-                gbytes = GLib.Bytes.new(pixels)
-
-                # Determine format based on alpha channel
-                fmt = (Gdk.MemoryFormat.R8G8B8A8 if has_alpha
-                       else Gdk.MemoryFormat.R8G8B8)
-
-                # Create memory texture
-                texture = Gdk.MemoryTexture.new(
-                    width, height, fmt, gbytes, rowstride
-                )
-                self.picture.set_paintable(texture)
+                # Always track the latest gen image
+                self.gen_pixbuf = pix
+                # Only update the visible preview on the generate tab
+                if self.view_stack.get_visible_child_name() == 'generate':
+                    self._show_pixbuf_in_preview(pix)
         except Exception:
             try:
                 loader.close()
             except Exception:
                 pass
+
+    def update_image_final(self, data):
+        """Update preview and add to gallery (final image only)."""
+        self.update_image(data)
+        self.gallery.add_image(data)
+
+    def _view_gallery_image(self, pixbuf):
+        """Show a gallery thumbnail in the shared preview panel."""
+        self.gallery_selected_pixbuf = pixbuf
+        self._show_pixbuf_in_preview(pixbuf)
+        # Reveal the preview panel if it's currently hidden
+        if not self.preview_revealer.get_reveal_child():
+            self.preview_revealer.set_hexpand(True)
+            self.preview_revealer.set_reveal_child(True)
+            self.preview_toggle.set_active(True)
 
 
 if __name__ == "__main__":
