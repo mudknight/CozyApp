@@ -116,6 +116,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.setup_css()
         self.style_list = []
+        self.model_list = []
         self.workflow_data = None
         self.tag_completion = TagCompletion(self.log)
         self.gen_queue = queue.Queue()
@@ -183,8 +184,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         # self.input_area.append(Gtk.Label(label="Style", xalign=0))
         style_box.append(Gtk.Label(label="Style", xalign=0))
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
+        self.style_dropdown.set_hexpand(True)
         # self.input_area.append(self.style_dropdown)
         style_box.append(self.style_dropdown)
+        
+        # Model selector
+        style_box.append(Gtk.Label(label="Model", xalign=0, margin_start=10))
+        self.model_dropdown = Gtk.DropDown.new_from_strings([])
+        self.model_dropdown.set_hexpand(True)
+        style_box.append(self.model_dropdown)
+        
         self.input_area.append(style_box)
 
         self.pos_buffer = GtkSource.Buffer()
@@ -673,6 +682,7 @@ class ComfyWindow(Adw.ApplicationWindow):
     def fetch_node_info(self):
         def worker():
             try:
+                # Fetch styles
                 url = (
                     f"http://{SERVER_ADDRESS}/object_info/"
                     f"{PROMPT_NODE_CLASS}"
@@ -695,11 +705,43 @@ class ComfyWindow(Adw.ApplicationWindow):
                 resp.close()
             except Exception as e:
                 self.log(f"Metadata fail: {e}")
+
+            try:
+                # Fetch models
+                url = (
+                    f"http://{SERVER_ADDRESS}/object_info/"
+                    f"{LOADER_NODE_CLASS}"
+                )
+                resp = requests.get(url, timeout=3)
+                if resp.status_code == 200:
+                    data = resp.json().get(LOADER_NODE_CLASS, {})
+                    inputs = data.get("input", {})
+                    models = None
+                    for cat in ["required", "optional"]:
+                        if "ckpt_name" in inputs.get(cat, {}):
+                            entry = inputs[cat]["ckpt_name"]
+                            models = (
+                                entry[0] if isinstance(entry, list)
+                                and isinstance(entry[0], list) else entry
+                            )
+                            break
+                    if models:
+                        GLib.idle_add(self.update_model_dropdown, models)
+                resp.close()
+            except Exception as e:
+                self.log(f"Model metadata fail: {e}")
         threading.Thread(target=worker, daemon=True).start()
 
     def update_style_dropdown(self, styles):
         self.style_list = styles
         self.style_dropdown.set_model(Gtk.StringList.new(styles))
+        if self.workflow_data:
+            self.sync_ui_from_json()
+        self.load_saved_state()
+
+    def update_model_dropdown(self, models):
+        self.model_list = models
+        self.model_dropdown.set_model(Gtk.StringList.new(models))
         if self.workflow_data:
             self.sync_ui_from_json()
         self.load_saved_state()
@@ -999,6 +1041,10 @@ class ComfyWindow(Adw.ApplicationWindow):
                         self.style_list.index(style_val))
             elif node.get("class_type") == LOADER_NODE_CLASS:
                 self.seed_adj.set_value(float(node["inputs"].get("seed", 0)))
+                model_val = node["inputs"].get("ckpt_name")
+                if model_val in self.model_list:
+                    self.model_dropdown.set_selected(
+                        self.model_list.index(model_val))
 
     def save_current_state(self):
         """
@@ -1019,8 +1065,16 @@ class ComfyWindow(Adw.ApplicationWindow):
             else None
         )
 
+        model_idx = self.model_dropdown.get_selected()
+        model = (
+            self.model_list[model_idx]
+            if self.model_list and model_idx != Gtk.INVALID_LIST_POSITION
+            else None
+        )
+
         state = {
             "style": style,
+            "model": model,
             "positive": pos,
             "negative": neg
         }
@@ -1046,6 +1100,10 @@ class ComfyWindow(Adw.ApplicationWindow):
             if "style" in state and state["style"] in self.style_list:
                 self.style_dropdown.set_selected(
                     self.style_list.index(state["style"])
+                )
+            if "model" in state and state["model"] in self.model_list:
+                self.model_dropdown.set_selected(
+                    self.model_list.index(state["model"])
                 )
 
             self.log("Loaded saved state from state.json")
@@ -1117,6 +1175,13 @@ class ComfyWindow(Adw.ApplicationWindow):
             else None
         )
 
+        model_idx = self.model_dropdown.get_selected()
+        model = (
+            self.model_list[model_idx]
+            if self.model_list and model_idx != Gtk.INVALID_LIST_POSITION
+            else None
+        )
+
         workflow_copy = json.loads(json.dumps(self.workflow_data))
         for node in workflow_copy.values():
             if node.get("class_type") == PROMPT_NODE_CLASS:
@@ -1125,6 +1190,8 @@ class ComfyWindow(Adw.ApplicationWindow):
                     node["inputs"]["style"] = style
             elif node.get("class_type") == LOADER_NODE_CLASS:
                 node["inputs"]["seed"] = current_seed
+                if model:
+                    node["inputs"]["ckpt_name"] = model
 
         self.gen_queue.put(workflow_copy)
         self.update_queue_label()
