@@ -352,13 +352,13 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Inner content of the queue status button
         queue_btn_content = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        self.queue_label = Gtk.Label(label="Queue: 0", xalign=0.5)
-        self.queue_label.set_width_chars(10)
-        self.queue_label.set_max_width_chars(10)
-        queue_btn_content.append(self.queue_label)
+        self.queue_label = Gtk.Label(label="0", xalign=0.5)
+        self.queue_label.set_width_chars(2)
+        self.queue_label.set_max_width_chars(2)
+        queue_btn_content.append(self.current_node_label)
         queue_btn_content.append(
             Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
-        queue_btn_content.append(self.current_node_label)
+        queue_btn_content.append(self.queue_label)
 
         # Listbox inside the popover, updated incrementally
         self._job_listbox = Gtk.ListBox(
@@ -1343,7 +1343,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         """
         with self.job_list_lock:
             total_count = len(self.job_list)
-        text = f"Queue: {total_count}"
+        text = f"{total_count}"
         GLib.idle_add(self._update_queue_label_ui, text, total_count)
 
     def _update_queue_label_ui(self, text, count):
