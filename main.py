@@ -305,9 +305,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.queue_label.set_max_width_chars(10)
         self.queue_box.append(self.queue_label)
 
-        btn_box.append(self.gen_button)
-        btn_box.append(self.stop_button)
-
         # progress_box = Gtk.Box(
         #     orientation=Gtk.Orientation.HORIZONTAL, spacing=8
         # )
@@ -324,8 +321,12 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.queue_box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         self.queue_box.append(self.current_node_label)
-        btn_box.append(self.progress_bar)
+
+        # Order elements in button box
         btn_box.append(self.queue_box)
+        btn_box.append(self.progress_bar)
+        btn_box.append(self.stop_button)
+        btn_box.append(self.gen_button)
 
         self.input_area.append(btn_box)
 
