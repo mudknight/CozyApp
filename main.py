@@ -186,7 +186,33 @@ class ComfyWindow(Adw.ApplicationWindow):
         # self.input_area.append(Gtk.Label(label="Style", xalign=0))
         style_box.append(Gtk.Label(label="Style", xalign=0))
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
-        self.style_dropdown.set_hexpand(True)
+        # self.style_dropdown.set_hexpand(True)
+        
+        # Create factory for ellipsizing style dropdown with fixed 10 char width
+        style_list_factory = Gtk.SignalListItemFactory()
+        def setup_style_item(factory, list_item):
+            label = Gtk.Label()
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.set_xalign(0)
+            label.set_width_chars(10)
+            label.set_max_width_chars(10)
+            list_item.set_child(label)
+
+        def bind_style_item(factory, list_item):
+            label = list_item.get_child()
+            string_obj = list_item.get_item()
+            label.set_label(string_obj.get_string())
+
+        style_list_factory.connect("setup", setup_style_item)
+        style_list_factory.connect("bind", bind_style_item)
+        self.style_dropdown.set_list_factory(style_list_factory)
+
+        # Also ellipsize the selected style display
+        style_button_factory = Gtk.SignalListItemFactory()
+        style_button_factory.connect("setup", setup_style_item)
+        style_button_factory.connect("bind", bind_style_item)
+        self.style_dropdown.set_factory(style_button_factory)
+        
         # self.input_area.append(self.style_dropdown)
         style_box.append(self.style_dropdown)
 
@@ -194,6 +220,34 @@ class ComfyWindow(Adw.ApplicationWindow):
         style_box.append(Gtk.Label(label="Model", xalign=0, margin_start=10))
         self.model_dropdown = Gtk.DropDown.new_from_strings([])
         self.model_dropdown.set_hexpand(True)
+        
+        # Allow the dropdown to shrink below its natural size
+        self.model_dropdown.set_size_request(50, -1)
+        
+        # Create factory for ellipsizing dropdown items
+        list_factory = Gtk.SignalListItemFactory()
+        def setup_list_item(factory, list_item):
+            label = Gtk.Label()
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.set_xalign(0)
+            label.set_max_width_chars(1)  # Force ellipsize to kick in
+            list_item.set_child(label)
+
+        def bind_list_item(factory, list_item):
+            label = list_item.get_child()
+            string_obj = list_item.get_item()
+            label.set_label(string_obj.get_string())
+
+        list_factory.connect("setup", setup_list_item)
+        list_factory.connect("bind", bind_list_item)
+        self.model_dropdown.set_list_factory(list_factory)
+
+        # Also ellipsize the selected item display
+        button_factory = Gtk.SignalListItemFactory()
+        button_factory.connect("setup", setup_list_item)
+        button_factory.connect("bind", bind_list_item)
+        self.model_dropdown.set_factory(button_factory)
+        
         style_box.append(self.model_dropdown)
 
         self.input_area.append(style_box)
@@ -297,6 +351,7 @@ class ComfyWindow(Adw.ApplicationWindow):
             orientation=Gtk.Orientation.VERTICAL,
             css_classes=["preview-panel"]
         )
+        preview_panel.set_size_request(400, -1)
 
         # ScrolledWindow that doesn't resize based on child
         picture_scroll = Gtk.ScrolledWindow(
