@@ -126,6 +126,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.debounce_timers = []
         self.current_pixbuf = None
         self.magnifier_size = 200
+        self.magnifier_enabled = False
         self.last_cursor_x = 0
         self.last_cursor_y = 0
 
@@ -145,6 +146,11 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.debug_toggle.connect("toggled", self.on_toggle_debug)
         self.header.pack_start(self.debug_toggle)
 
+        self.magnifier_toggle = Gtk.ToggleButton(
+            icon_name="system-search-symbolic")
+        self.magnifier_toggle.set_tooltip_text("Toggle magnifier")
+        self.magnifier_toggle.connect("toggled", self.on_toggle_magnifier)
+
         self.preview_toggle = Gtk.ToggleButton(
             icon_name="view-reveal-symbolic", active=True)
         self.preview_toggle.connect("toggled", self.on_toggle_preview)
@@ -156,6 +162,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         self.header.pack_end(self.menu_button)
         self.header.pack_end(self.preview_toggle)
+        self.header.pack_end(self.magnifier_toggle)
 
         self.toast_overlay = Adw.ToastOverlay()
         self.main_box.append(self.toast_overlay)
@@ -488,7 +495,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
     def on_picture_enter(self, controller, x, y):
         """Handle mouse entering the picture."""
-        if self.is_image_downscaled():
+        if self.is_image_downscaled() and self.magnifier_enabled:
             self.picture.set_cursor(self.crosshair_cursor)
         else:
             if self.default_cursor is None:
@@ -497,7 +504,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
     def on_picture_scroll(self, controller, dx, dy):
         """Handle scroll wheel to adjust magnifier size."""
-        if not self.is_image_downscaled():
+        if not self.is_image_downscaled() or not self.magnifier_enabled:
             return False
 
         # Adjust size based on scroll direction
@@ -525,7 +532,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.last_cursor_x = x
         self.last_cursor_y = y
 
-        if not self.is_image_downscaled():
+        if not self.is_image_downscaled() or not self.magnifier_enabled:
             if self.magnifier_frame.get_visible():
                 self.magnifier_frame.set_visible(False)
             self.picture.set_cursor(self.default_cursor)
@@ -866,6 +873,15 @@ class ComfyWindow(Adw.ApplicationWindow):
             # Hide: disable expansion then collapse
             self.preview_revealer.set_hexpand(False)
             self.preview_revealer.set_reveal_child(False)
+
+    def on_toggle_magnifier(self, btn):
+        """
+        Toggle magnifier functionality.
+        """
+        self.magnifier_enabled = btn.get_active()
+        # Hide magnifier when disabled
+        if not self.magnifier_enabled and self.magnifier_frame.get_visible():
+            self.magnifier_frame.set_visible(False)
 
     def on_toggle_debug(self, btn):
         self.debug_revealer.set_reveal_child(btn.get_active())
