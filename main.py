@@ -16,8 +16,9 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_version('GtkSource', '5')
+gi.require_version('Pango', '1.0')
 
-from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource, Pango
 from tag_completion import TagCompletion
 
 
@@ -214,10 +215,23 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.input_area.append(btn_box)
 
         progress_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=6
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8
         )
-        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar = Gtk.ProgressBar(hexpand=True)
+        self.progress_bar.set_valign(Gtk.Align.CENTER)
+
+        # Current node label (inline with progress bar)
+        self.current_node_label = Gtk.Label(
+            label="Ready",
+            xalign=0,
+            css_classes=["current-node-label"]
+        )
+        self.current_node_label.set_size_request(200, -1)
+        self.current_node_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.current_node_label.set_valign(Gtk.Align.CENTER)
+        progress_box.append(self.current_node_label)
         progress_box.append(self.progress_bar)
+
         self.input_area.append(progress_box)
 
         # Bottom section: Debug (Split vertically from inputs)
@@ -588,6 +602,15 @@ class ComfyWindow(Adw.ApplicationWindow):
                 border-color: @accent_bg_color;
                 color: @accent_fg_color;
                 opacity: 1.0;
+            }
+            .current-node-label {
+                padding: 6px 10px;
+                border-radius: 6px;
+                background-color: alpha(@accent_bg_color, 0.2);
+                border: 1px solid alpha(@accent_bg_color, 0.4);
+                color: @accent_fg_color;
+                font-size: 10px;
+                font-family: monospace;
             }
         """
         css_provider.load_from_data(css_content, len(css_content))
@@ -986,6 +1009,15 @@ class ComfyWindow(Adw.ApplicationWindow):
         except Exception as e:
             self.log(f"Error loading state: {e}")
 
+    def set_current_node(self, text):
+        """
+        Update the current node label.
+
+        Args:
+            text: Node name to display
+        """
+        self.current_node_label.set_text(text if text else "Ready")
+
     def update_queue_label(self):
         """
         Update the queue status label.
@@ -1116,8 +1148,14 @@ class ComfyWindow(Adw.ApplicationWindow):
                         GLib.idle_add(self.update_image, img_data)
 
                 if msg['type'] == 'executing':
-                    if msg['data']['node'] is None:
+                    node_id = msg['data']['node']
+                    if node_id is None:
                         break
+                    # Get node class type from workflow
+                    node_class = workflow_data.get(
+                        node_id, {}
+                    ).get('class_type', 'Unknown')
+                    GLib.idle_add(self.set_current_node, node_class)
 
             hist_resp = requests.get(
                 f"http://{SERVER_ADDRESS}/history/{prompt_id}",
@@ -1146,6 +1184,8 @@ class ComfyWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
             GLib.idle_add(self.progress_bar.set_fraction, 0.0)
+            # Hide current node label
+            GLib.idle_add(self.set_current_node, None)
 
     def update_image(self, data):
         loader = GdkPixbuf.PixbufLoader.new()
