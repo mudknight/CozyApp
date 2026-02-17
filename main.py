@@ -453,7 +453,10 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.crosshair_cursor = Gdk.Cursor.new_from_name("crosshair")
 
         # Gallery page — clicking a thumbnail updates the shared preview
-        self.gallery = GalleryPage(on_view_image=self._view_gallery_image)
+        self.gallery = GalleryPage(
+            on_view_image=self._view_gallery_image,
+            on_delete_image=self._on_delete_image
+        )
         self.view_stack.add_titled_with_icon(
             self.gallery.widget, 'gallery', 'Gallery',
             'image-x-generic-symbolic'
@@ -738,6 +741,17 @@ class ComfyWindow(Adw.ApplicationWindow):
         css_provider = Gtk.CssProvider()
         css_content = """
             .gallery-thumb { border-radius: 8px; }
+            .gallery-delete-btn {
+                padding: 4px;
+                min-width: 0;
+                min-height: 0;
+                border-radius: 6px;
+                background-color: alpha(@error_color, 0.75);
+                color: white;
+            }
+            .gallery-delete-btn:hover {
+                background-color: @error_color;
+            }
             revealer { background-color: transparent; border: none; }
             .preview-panel { background-color: @card_bg_color; border-left: none; }
             .view { border: none; border-radius: 8px; background-color: @view_bg_color; }
@@ -1459,7 +1473,9 @@ class ComfyWindow(Adw.ApplicationWindow):
                     )
                     data = data_resp.content
                     data_resp.close()
-                    GLib.idle_add(self.update_image_final, data)
+                    GLib.idle_add(
+                        self.update_image_final, data, img
+                    )
                     break
         except Exception as e:
             self.log(f"Gen error: {e}")
@@ -1526,10 +1542,65 @@ class ComfyWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
-    def update_image_final(self, data):
+    def update_image_final(self, data, image_info=None):
         """Update preview and add to gallery (final image only)."""
         self.update_image(data)
-        self.gallery.add_image(data)
+        self.gallery.add_image(data, image_info)
+
+    def _on_delete_image(self, image_info, remove_fn):
+        """
+        Delete an image from the server via the ComfyUI-api-tools API.
+
+        Runs the network request in a thread, then shows a toast and
+        removes the thumbnail on success.
+        """
+        def worker():
+            # image_info is None when the node pack was unavailable at
+            # generation time and metadata was never stored
+            if not image_info or not image_info.get('filename'):
+                GLib.idle_add(
+                    self._show_toast,
+                    'No filename metadata — cannot delete this image.'
+                )
+                return
+
+            filename = image_info['filename']
+            url = (
+                f"http://{SERVER_ADDRESS}"
+                f"/api-tools/v1/images/output/{filename}"
+            )
+            try:
+                resp = requests.delete(url, timeout=10)
+                if resp.status_code == 200:
+                    GLib.idle_add(remove_fn)
+                    GLib.idle_add(
+                        self._show_toast,
+                        f'Deleted {filename}'
+                    )
+                elif resp.status_code == 404:
+                    # Either the node pack is missing or the file is gone
+                    GLib.idle_add(
+                        self._show_toast,
+                        'Install ComfyUI-api-tools to enable deletion'
+                    )
+                else:
+                    GLib.idle_add(
+                        self._show_toast,
+                        f'Delete failed (HTTP {resp.status_code})'
+                    )
+            except Exception as e:
+                GLib.idle_add(
+                    self._show_toast,
+                    f'Delete error: {e}'
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_toast(self, message: str):
+        """Show an Adw.Toast with the given message."""
+        toast = Adw.Toast.new(message)
+        toast.set_timeout(3)
+        self.toast_overlay.add_toast(toast)
 
     def _view_gallery_image(self, pixbuf):
         """Show a gallery thumbnail in the shared preview panel."""
