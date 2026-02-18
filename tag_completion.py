@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tag autocompletion functionality for ComfyUI frontend."""
 
-from gi.repository import Gtk, Gdk, Pango
+from gi.repository import Gtk, Gdk, Pango, GLib
 import csv
 import json
 import urllib.request
@@ -88,6 +88,15 @@ class TagCompletion:
             # Sort by usage (descending)
             tag_list.sort(key=lambda x: x[2], reverse=True)
             self.sorted_tags = [tag for tag, _, _ in tag_list]
+
+            # Prepend sentinel entries so 'character' and 'tag' always
+            # appear at the top of completions ahead of danbooru tags.
+            _SENTINEL = 10_000_000_000
+            for _name in reversed(('character', 'tag')):
+                self.tag_data[_name] = (-1, _SENTINEL)
+                if _name in self.sorted_tags:
+                    self.sorted_tags.remove(_name)
+                self.sorted_tags.insert(0, _name)
 
             total_tags = (
                 len(self.sorted_tags) + len(self.tag_aliases)
@@ -417,7 +426,23 @@ class TagCompletion:
             hbox.append(tag_label)
 
             # Check if this is a character, LoRA, or regular tag
-            if tag in self.tag_data:
+            if tag == 'character':
+                badge = Gtk.Label()
+                badge.set_markup(
+                    '<span background="#50C878" '
+                    'foreground="white" weight="bold"> '
+                    'CHARACTER </span>'
+                )
+                hbox.append(badge)
+            elif tag == 'tag':
+                badge = Gtk.Label()
+                badge.set_markup(
+                    '<span background="#5C6BC0" '
+                    'foreground="white" weight="bold"> '
+                    'TAG </span>'
+                )
+                hbox.append(badge)
+            elif tag in self.tag_data:
                 # Get tag data for regular tags
                 category, usage = self.tag_data.get(tag, (0, 0))
                 color, cat_name = self.CATEGORY_COLORS.get(
@@ -571,21 +596,36 @@ class TagCompletion:
         if is_lora:
             # For LoRAs, insert full syntax with default weight
             formatted_tag = f"<lora:{tag}:1.0>"
+            buffer.delete(iter_start, iter_cursor)
+            buffer.insert(iter_start, formatted_tag + ", ")
+        elif tag == 'character' and not is_character and not is_tag_preset:
+            # Sentinel: insert prefix and immediately show character list
+            buffer.delete(iter_start, iter_cursor)
+            buffer.insert(iter_start, 'character:')
+            GLib.idle_add(self.show_popup, textview, self.characters[:10])
+        elif tag == 'tag' and not is_tag_preset and not is_character:
+            # Sentinel: insert prefix and immediately show tag preset list
+            buffer.delete(iter_start, iter_cursor)
+            buffer.insert(iter_start, 'tag:')
+            GLib.idle_add(self.show_popup, textview, self.tag_presets[:10])
         elif is_character:
             # For characters, keep as-is and preserve the prefix
             formatted_tag = f"character:{tag}"
+            buffer.delete(iter_start, iter_cursor)
+            buffer.insert(iter_start, formatted_tag + ", ")
         elif is_tag_preset:
             # For tag presets, preserve the tag: prefix
             formatted_tag = f"tag:{tag}"
+            buffer.delete(iter_start, iter_cursor)
+            buffer.insert(iter_start, formatted_tag + ", ")
         else:
             # For regular tags, replace underscores and escape parens
             formatted_tag = tag.replace('_', ' ')
             formatted_tag = formatted_tag.replace(
                 '(', '\\('
             ).replace(')', '\\)')
-
-        buffer.delete(iter_start, iter_cursor)
-        buffer.insert(iter_start, formatted_tag + ", ")
+            buffer.delete(iter_start, iter_cursor)
+            buffer.insert(iter_start, formatted_tag + ", ")
 
     def should_show_completion(self, buffer, iter_cursor):
         """
