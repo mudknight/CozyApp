@@ -19,6 +19,7 @@ from generate import GeneratePage  # noqa
 from gallery import GalleryPage  # noqa
 from characters import CharactersPage  # noqa
 from styles import StylesPage  # noqa
+from tags import TagsPage  # noqa
 
 
 def setup_language_manager():
@@ -218,6 +219,16 @@ class ComfyWindow(Adw.ApplicationWindow):
             'applications-graphics-symbolic'
         )
 
+        # Tags page
+        self.tags = TagsPage(
+            on_tag_selected=self._on_tag_selected,
+            log_fn=self.log
+        )
+        self.view_stack.add_titled_with_icon(
+            self.tags.widget, 'tags', 'Tags',
+            'bookmark-new-symbolic'
+        )
+
         self.view_stack.connect(
             'notify::visible-child', self._on_tab_changed
         )
@@ -342,10 +353,11 @@ class ComfyWindow(Adw.ApplicationWindow):
         return menu
 
     def on_reload(self, action, param):
-        """Reload style/model lists and character/style grids."""
+        """Reload style/model lists and character/style/tag grids."""
         self.generate_page.fetch_node_info()
         self.characters.fetch_characters()
         self.styles.fetch_styles()
+        self.tags.fetch_tags()
 
     def on_show_settings(self, action, param):
         """Show the settings dialog."""
@@ -738,6 +750,12 @@ class ComfyWindow(Adw.ApplicationWindow):
             self._show_toast(f"Style set to {style_name}")
         else:
             self.log(f"Style {style_name} not found in dropdown list")
+        self.view_stack.set_visible_child_name('generate')
+
+    def _on_tag_selected(self, tag_name):
+        """Insert a tag reference and switch to the generate tab."""
+        self.generate_page.insert_tag(tag_name)
+        self._show_toast(f"Added tag:{tag_name}")
         self.view_stack.set_visible_child_name('generate')
 
     # ------------------------------------------------------------------

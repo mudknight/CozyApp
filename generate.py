@@ -96,6 +96,7 @@ class GeneratePage:
         self.tag_completion.load_tags()
         self.tag_completion.load_characters()
         self.tag_completion.load_loras()
+        self.tag_completion.load_tag_presets()
         # Apply any saved blacklist immediately
         self.tag_completion.set_blacklist(
             config.get("tag_blacklist") or []
@@ -402,6 +403,12 @@ class GeneratePage:
         current = self.pos_buffer.get_text(start, end, False)
         if tag.strip() not in current:
             self.pos_buffer.insert(end, tag)
+
+    def insert_tag(self, name):
+        """Append a tag reference to the positive prompt."""
+        tag = f"tag:{name}, "
+        _, end = self.pos_buffer.get_bounds()
+        self.pos_buffer.insert(end, tag)
 
     def set_style(self, style_name):
         """Select a style in the style dropdown by name."""

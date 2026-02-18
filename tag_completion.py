@@ -35,6 +35,7 @@ class TagCompletion:
         self.sorted_tags = []
         self.characters = []  # character names from API
         self.loras = []  # LoRA names from API
+        self.tag_presets = []  # tag preset names from API
         self.completion_popup = None
         self.listbox = None
         self.scrolled = None
@@ -190,6 +191,32 @@ class TagCompletion:
         except Exception as e:
             self.log(f"Error loading LoRAs: {e}")
 
+    def load_tag_presets(
+        self,
+        url='http://localhost:8188/tag_editor'
+    ):
+        """
+        Load tag preset names from the tag_editor API endpoint.
+
+        Args:
+            url: API endpoint URL
+        """
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if isinstance(data, dict):
+                    self.tag_presets = sorted(list(data.keys()))
+                    self.log(
+                        f"Loaded {len(self.tag_presets)} tag presets "
+                        f"from {url}"
+                    )
+                else:
+                    self.log(f"Unexpected data format from {url}")
+        except urllib.error.URLError as e:
+            self.log(f"Could not load tag presets from {url}: {e}")
+        except Exception as e:
+            self.log(f"Error loading tag presets: {e}")
+
     def get_completions(self, text, cursor_pos=None):
         """
         Get tag completions for the current text.
@@ -254,6 +281,16 @@ class TagCompletion:
                 matches = [
                     char for char in self.characters
                     if search in char.split('/')[-1].lower()
+                ]
+                return matches[:10]
+
+            # Handle tag preset completion: tag:name
+            if prefix == 'tag':
+                if not search:
+                    return self.tag_presets[:10]
+                matches = [
+                    preset for preset in self.tag_presets
+                    if search in preset.lower()
                 ]
                 return matches[:10]
 
@@ -421,6 +458,15 @@ class TagCompletion:
                     'LORA </span>'
                 )
                 hbox.append(lora_badge)
+            elif tag in self.tag_presets:
+                # For tag presets, add a badge
+                preset_badge = Gtk.Label()
+                preset_badge.set_markup(
+                    '<span background="#5C6BC0" '
+                    'foreground="white" weight="bold"> '
+                    'TAG </span>'
+                )
+                hbox.append(preset_badge)
             else:
                 # For characters, add a badge
                 char_badge = Gtk.Label()
@@ -520,6 +566,7 @@ class TagCompletion:
         replaced_text = buffer.get_text(iter_start, iter_cursor, False)
         is_character = 'character:' in replaced_text.lower()
         is_lora = '<lora:' in replaced_text.lower()
+        is_tag_preset = replaced_text.lower().startswith('tag:')
 
         if is_lora:
             # For LoRAs, insert full syntax with default weight
@@ -527,6 +574,9 @@ class TagCompletion:
         elif is_character:
             # For characters, keep as-is and preserve the prefix
             formatted_tag = f"character:{tag}"
+        elif is_tag_preset:
+            # For tag presets, preserve the tag: prefix
+            formatted_tag = f"tag:{tag}"
         else:
             # For regular tags, replace underscores and escape parens
             formatted_tag = tag.replace('_', ' ')
