@@ -242,13 +242,41 @@ class GalleryPage(Gtk.ScrolledWindow):
         if pixbuf and self._on_view_image:
             self._on_view_image(pixbuf)
 
+    def _get_num_columns(self):
+        """Count columns by comparing y-allocations of consecutive items."""
+        children = self._get_all_children()
+        if not children:
+            return 1
+        # Get the y-position of the first child
+        ok, first_bounds = children[0].compute_bounds(self._flow)
+        if not ok:
+            return 1
+        first_y = first_bounds.get_y()
+        # Count how many children share the same row as the first
+        count = 0
+        for child in children:
+            ok, bounds = child.compute_bounds(self._flow)
+            if not ok:
+                break
+            if abs(bounds.get_y() - first_y) < 1:
+                count += 1
+            else:
+                break
+        return max(1, count)
+
     def _on_flow_key_pressed(self, controller, keyval, keycode, state):
         """Override arrow key navigation to use _last_activated_child."""
-        if keyval in (Gdk.KEY_Left, Gdk.KEY_Up):
+        if keyval == Gdk.KEY_Left:
             self.select_prev()
             return True
-        if keyval in (Gdk.KEY_Right, Gdk.KEY_Down):
+        if keyval == Gdk.KEY_Right:
             self.select_next()
+            return True
+        if keyval == Gdk.KEY_Up:
+            self._select_offset(-self._get_num_columns())
+            return True
+        if keyval == Gdk.KEY_Down:
+            self._select_offset(self._get_num_columns())
             return True
         return False
 
@@ -317,6 +345,24 @@ class GalleryPage(Gtk.ScrolledWindow):
         popover.set_child(box)
         self._active_popover = popover
         popover.popup()
+
+    def _select_offset(self, offset):
+        """Select the child at *offset* from the current, clamped to bounds."""
+        children = self._get_all_children()
+        if not children:
+            return
+        if self._last_activated_child in children:
+            current = children.index(self._last_activated_child)
+        else:
+            # Default to start/end depending on direction
+            current = 0 if offset > 0 else len(children) - 1
+        # Clamp to valid range instead of wrapping
+        idx = max(0, min(current + offset, len(children) - 1))
+        child = children[idx]
+        self._flow.unselect_all()
+        self._flow.select_child(child)
+        self._flow.set_focus_child(child)
+        self._last_activated_child = child
 
     def select_next(self):
         """Select the next item, using last click as the reference."""
