@@ -49,6 +49,16 @@ class GalleryPage(Gtk.ScrolledWindow):
         self._flow.connect(
             'selected-children-changed', self._on_selection_changed
         )
+        self._flow.connect(
+            'child-activated', self._on_child_activated
+        )
+
+        # Capture arrow keys before FlowBox handles them so that
+        # navigation always starts from the last clicked child
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        key_ctrl.connect('key-pressed', self._on_flow_key_pressed)
+        self._flow.add_controller(key_ctrl)
 
         outer.append(self._flow)
         self.set_child(outer)
@@ -63,6 +73,13 @@ class GalleryPage(Gtk.ScrolledWindow):
         self._overlay.set_child(self)
         self._placeholder.set_visible(True)
         self._overlay.add_overlay(self._placeholder)
+
+    def grab_focus(self):
+        """Focus the flowbox or its selected child."""
+        self._flow.grab_focus()
+        selected = self._flow.get_selected_children()
+        if selected:
+            self._flow.set_focus_child(selected[0])
 
     # ------------------------------------------------------------------
     # Public API
@@ -155,6 +172,17 @@ class GalleryPage(Gtk.ScrolledWindow):
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
 
+        # Force keyboard focus to the FlowBox
+        self._flow.grab_focus()
+
+        # Sync selection and update navigation reference
+        if button == 1 and not (ctrl or shift):
+            self._flow.unselect_all()
+            self._flow.select_child(child)
+            self._last_activated_child = child
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            return
+
         if button == 3:
             # Right-click: ensure clicked item is selected
             if not child.is_selected():
@@ -200,9 +228,33 @@ class GalleryPage(Gtk.ScrolledWindow):
         selected = flow_box.get_selected_children()
         if len(selected) != 1:
             return
-        pixbuf = self._pixbuf_from_child(selected[0])
+        child = selected[0]
+        # Sync the GTK focus/cursor with the selection
+        index = child.get_index()
+        self._flow.select_child(child)
+        # Using select_child is not enough to move the keyboard cursor.
+        # We need to tell the FlowBox to move its "cursor" to this child.
+        # GTK4 doesn't have a direct 'set_cursor' for FlowBox, but we can
+        # use the internal child activation or focus management.
+        self._flow.set_focus_child(child)
+        
+        pixbuf = self._pixbuf_from_child(child)
         if pixbuf and self._on_view_image:
             self._on_view_image(pixbuf)
+
+    def _on_flow_key_pressed(self, controller, keyval, keycode, state):
+        """Override arrow key navigation to use _last_activated_child."""
+        if keyval in (Gdk.KEY_Left, Gdk.KEY_Up):
+            self.select_prev()
+            return True
+        if keyval in (Gdk.KEY_Right, Gdk.KEY_Down):
+            self.select_next()
+            return True
+        return False
+
+    def _on_child_activated(self, flow_box, child):
+        """Update last activated child on activation (e.g. keyboard nav)."""
+        self._last_activated_child = child
 
     # ------------------------------------------------------------------
     # Context menu
@@ -265,6 +317,44 @@ class GalleryPage(Gtk.ScrolledWindow):
         popover.set_child(box)
         self._active_popover = popover
         popover.popup()
+
+    def select_next(self):
+        """Select the next item, using last click as the reference."""
+        children = self._get_all_children()
+        if not children:
+            return
+
+        idx = 0
+        # Use the last clicked child as the arrow-nav reference
+        if self._last_activated_child in children:
+            idx = (
+                children.index(self._last_activated_child) + 1
+            ) % len(children)
+
+        child = children[idx]
+        self._flow.unselect_all()
+        self._flow.select_child(child)
+        self._flow.set_focus_child(child)
+        self._last_activated_child = child
+
+    def select_prev(self):
+        """Select the previous item, using last click as the reference."""
+        children = self._get_all_children()
+        if not children:
+            return
+
+        idx = len(children) - 1
+        # Use the last clicked child as the arrow-nav reference
+        if self._last_activated_child in children:
+            idx = (
+                children.index(self._last_activated_child) - 1
+            ) % len(children)
+
+        child = children[idx]
+        self._flow.unselect_all()
+        self._flow.select_child(child)
+        self._flow.set_focus_child(child)
+        self._last_activated_child = child
 
     def _copy_to_clipboard(self, pixbuf):
         """Copy pixbuf to the system clipboard as an image."""
