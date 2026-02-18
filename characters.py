@@ -4,6 +4,7 @@ import requests
 import gi
 import urllib.parse
 import base64
+import config
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -12,7 +13,6 @@ gi.require_version('GdkPixbuf', '2.0')
 
 from gi.repository import Gtk, Adw, GLib, Gdk, Pango, GdkPixbuf  # noqa
 
-SERVER_ADDRESS = "127.0.0.1:8188"
 THUMBNAIL_SIZE = 220
 
 
@@ -84,7 +84,10 @@ class CharacterCard(Gtk.Frame):
                 # Replicate JS: btoa(unescape(encodeURIComponent(name)))
                 # For UTF-8, this is equivalent to base64 encoding the UTF-8 bytes
                 encoded_name = base64.b64encode(self.name.encode('utf-8')).decode('ascii')
-                url = f"http://{SERVER_ADDRESS}/character_editor/image/{encoded_name}"
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/character_editor/image/{encoded_name}"
+                )
                 print(f"[DEBUG] Fetching image for {self.name}: {url}")
                 resp = requests.get(url, timeout=10)
                 print(f"[DEBUG] Response for {self.name}: {resp.status_code}, content-type: {resp.headers.get('content-type')}")
@@ -219,7 +222,9 @@ class CharactersPage(Gtk.ScrolledWindow):
         """Fetch character data from the server."""
         def worker():
             try:
-                url = f"http://{SERVER_ADDRESS}/character_editor"
+                url = (
+                    f"http://{config.server_address()}/character_editor"
+                )
                 resp = requests.get(url, timeout=5)
                 if resp.status_code == 200:
                     data = resp.json()

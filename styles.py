@@ -4,6 +4,7 @@ import requests
 import gi
 import urllib.parse
 import base64
+import config
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -11,7 +12,6 @@ gi.require_version('GdkPixbuf', '2.0')
 
 from gi.repository import Gtk, Adw, GLib, Gdk, Pango, GdkPixbuf  # noqa
 
-SERVER_ADDRESS = "127.0.0.1:8188"
 THUMBNAIL_SIZE = 220
 
 
@@ -59,7 +59,10 @@ class StyleCard(Gtk.Frame):
             try:
                 # Replicate JS encoding for consistency
                 encoded_name = base64.b64encode(self.name.encode('utf-8')).decode('ascii')
-                url = f"http://{SERVER_ADDRESS}/style_editor/image/{encoded_name}"
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/style_editor/image/{encoded_name}"
+                )
                 resp = requests.get(url, timeout=10)
                 if resp.status_code == 200:
                     data = resp.content
@@ -161,7 +164,9 @@ class StylesPage(Gtk.ScrolledWindow):
         """Fetch style data from the server."""
         def worker():
             try:
-                url = f"http://{SERVER_ADDRESS}/style_editor"
+                url = (
+                    f"http://{config.server_address()}/style_editor"
+                )
                 resp = requests.get(url, timeout=5)
                 if resp.status_code == 200:
                     data = resp.json()

@@ -20,6 +20,7 @@ gi.require_version('GtkSource', '5')
 gi.require_version('Pango', '1.0')
 
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource, Pango  # noqa
+import config
 from tag_completion import TagCompletion  # noqa
 from gallery import GalleryPage  # noqa
 from characters import CharactersPage  # noqa
@@ -65,7 +66,6 @@ def setup_language_manager():
     return lang_file
 
 
-SERVER_ADDRESS = "127.0.0.1:8188"
 CLIENT_ID = str(uuid.uuid4())
 PROMPT_NODE_CLASS = "PromptConditioningNode"
 LOADER_NODE_CLASS = "LoaderFullPipe"
@@ -79,6 +79,7 @@ class ComfyApp(Adw.Application):
         self.connect('activate', self.on_activate)
         self.connect('shutdown', self.on_shutdown)
         self.workflow_file = None
+        config.load()
         # Set up language manager early, before views are created
         self._lang_file = setup_language_manager()
 
@@ -570,16 +571,56 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.load_workflow_file(self.workflow_file)
 
     def create_overflow_menu(self):
-        """Create the overflow menu with about action."""
+        """Create the overflow menu with settings and about actions."""
         menu = Gio.Menu()
+        menu.append("Settings", "app.settings")
         menu.append("About", "app.about")
 
-        # Add the action to the application
-        action = Gio.SimpleAction.new("about", None)
-        action.connect("activate", self.on_show_about)
-        self.get_application().add_action(action)
+        settings_action = Gio.SimpleAction.new("settings", None)
+        settings_action.connect("activate", self.on_show_settings)
+        self.get_application().add_action(settings_action)
+
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", self.on_show_about)
+        self.get_application().add_action(about_action)
 
         return menu
+
+    def on_show_settings(self, action, param):
+        """Show the settings dialog."""
+        dialog = Adw.PreferencesDialog()
+        dialog.set_title("Settings")
+
+        page = Adw.PreferencesPage()
+        dialog.add(page)
+
+        group = Adw.PreferencesGroup(
+            title="ComfyUI Server",
+            description="Address of the running ComfyUI instance."
+        )
+        page.add(group)
+
+        # Host row
+        host_row = Adw.EntryRow(title="Host")
+        host_row.set_text(config.get("host"))
+        group.add(host_row)
+
+        # Port row
+        port_adj = Gtk.Adjustment(
+            value=config.get("port"),
+            lower=1, upper=65535,
+            step_increment=1
+        )
+        port_row = Adw.SpinRow(title="Port", adjustment=port_adj)
+        group.add(port_row)
+
+        def on_close(_):
+            config.set("host", host_row.get_text().strip())
+            config.set("port", int(port_adj.get_value()))
+            config.save()
+
+        dialog.connect("closed", on_close)
+        dialog.present(self)
 
     def on_show_about(self, action, param):
         """Show the about dialog using Adw.AboutDialog."""
@@ -906,7 +947,7 @@ class ComfyWindow(Adw.ApplicationWindow):
             try:
                 # Fetch styles
                 url = (
-                    f"http://{SERVER_ADDRESS}/object_info/"
+                    f"http://{config.server_address()}/object_info/"
                     f"{PROMPT_NODE_CLASS}"
                 )
                 resp = requests.get(url, timeout=3)
@@ -931,7 +972,7 @@ class ComfyWindow(Adw.ApplicationWindow):
             try:
                 # Fetch models
                 url = (
-                    f"http://{SERVER_ADDRESS}/object_info/"
+                    f"http://{config.server_address()}/object_info/"
                     f"{LOADER_NODE_CLASS}"
                 )
                 resp = requests.get(url, timeout=3)
@@ -1453,7 +1494,10 @@ class ComfyWindow(Adw.ApplicationWindow):
 
     def on_stop_clicked(self, _):
         try:
-            requests.post(f"http://{SERVER_ADDRESS}/interrupt", timeout=5)
+            requests.post(
+                f"http://{config.server_address()}/interrupt",
+                timeout=5
+            )
             self.log("Interrupt signal sent.")
         except Exception as e:
             self.log(f"Stop error: {e}")
@@ -1635,10 +1679,12 @@ class ComfyWindow(Adw.ApplicationWindow):
             # Tracks index of currently executing node
             current_index = 0
 
-            ws.connect(f"ws://{SERVER_ADDRESS}/ws?clientId={CLIENT_ID}")
+            ws.connect(
+                f"ws://{config.server_address()}/ws?clientId={CLIENT_ID}"
+            )
             payload = {"prompt": workflow_data, "client_id": CLIENT_ID}
             resp = requests.post(
-                f"http://{SERVER_ADDRESS}/prompt",
+                f"http://{config.server_address()}/prompt",
                 json=payload,
                 timeout=10
             )
@@ -1690,14 +1736,15 @@ class ComfyWindow(Adw.ApplicationWindow):
                     if 'images' in msg['data']['output']:
                         img = msg['data']['output']['images'][0]
                         img_resp = requests.get(
-                            f"http://{SERVER_ADDRESS}/view", params=img
+                            f"http://{config.server_address()}/view",
+                            params=img
                         )
                         img_data = img_resp.content
                         img_resp.close()
                         GLib.idle_add(self.update_image, img_data)
 
             hist_resp = requests.get(
-                f"http://{SERVER_ADDRESS}/history/{prompt_id}",
+                f"http://{config.server_address()}/history/{prompt_id}",
                 timeout=10
             )
             history = hist_resp.json().get(prompt_id, {})
@@ -1709,7 +1756,8 @@ class ComfyWindow(Adw.ApplicationWindow):
                 ) == SAVE_NODE_CLASS:
                     img = node_output['images'][0]
                     data_resp = requests.get(
-                        f"http://{SERVER_ADDRESS}/view", params=img
+                        f"http://{config.server_address()}/view",
+                        params=img
                     )
                     data = data_resp.content
                     data_resp.close()
@@ -1944,7 +1992,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
             filename = image_info['filename']
             url = (
-                f"http://{SERVER_ADDRESS}"
+                f"http://{config.server_address()}"
                 f"/api-tools/v1/images/output/{filename}"
             )
             try:
