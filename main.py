@@ -295,6 +295,18 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.input_area.append(style_box)
 
+        seed_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        seed_box.append(Gtk.Label(label="Seed", xalign=0))
+        self.seed_adj = Gtk.Adjustment(
+            value=0, lower=0, upper=2**64-1, step_increment=1)
+        self.seed_entry = Gtk.SpinButton(
+            adjustment=self.seed_adj, numeric=True, hexpand=True)
+        self.seed_mode_combo = Gtk.DropDown.new_from_strings(
+            ["Randomize", "Fixed"])
+        seed_box.append(self.seed_entry)
+        seed_box.append(self.seed_mode_combo)
+        self.input_area.append(seed_box)
+
         self.pos_buffer = GtkSource.Buffer()
         self.setup_comment_highlighting(self.pos_buffer)
         self.input_area.append(Gtk.Label(label="Positive Prompt", xalign=0))
@@ -308,19 +320,6 @@ class ComfyWindow(Adw.ApplicationWindow):
         neg_scrolled, self.neg_textview = self.create_scrolled_textview(
             self.neg_buffer)
         self.input_area.append(neg_scrolled)
-
-        # self.input_area.append(Gtk.Label(label="Seed", xalign=0))
-        seed_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        seed_box.append(Gtk.Label(label="Seed", xalign=0))
-        self.seed_adj = Gtk.Adjustment(
-            value=0, lower=0, upper=2**64-1, step_increment=1)
-        self.seed_entry = Gtk.SpinButton(
-            adjustment=self.seed_adj, numeric=True, hexpand=True)
-        self.seed_mode_combo = Gtk.DropDown.new_from_strings(
-            ["Randomize", "Fixed"])
-        seed_box.append(self.seed_entry)
-        seed_box.append(self.seed_mode_combo)
-        self.input_area.append(seed_box)
 
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.gen_button = Gtk.Button(label="Queue", css_classes=[
