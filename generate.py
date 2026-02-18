@@ -193,6 +193,18 @@ class GeneratePage:
         box.append(self.portrait_toggle)
 
         box.append(
+            Gtk.Label(label="Quality", xalign=0, margin_start=10)
+        )
+        self.quality_tags_toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
+        box.append(self.quality_tags_toggle)
+
+        box.append(
+            Gtk.Label(label="Embeddings", xalign=0, margin_start=10)
+        )
+        self.embeddings_toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
+        box.append(self.embeddings_toggle)
+
+        box.append(
             Gtk.Label(label="Detailer", xalign=0, margin_start=10)
         )
         self.detailer_dropdown = Gtk.DropDown.new_from_strings(
@@ -544,6 +556,12 @@ class GeneratePage:
                     self.style_dropdown.set_selected(
                         self.style_list.index(style_val)
                     )
+                self.quality_tags_toggle.set_active(
+                    bool(inp.get("quality_tags", False))
+                )
+                self.embeddings_toggle.set_active(
+                    bool(inp.get("embeddings", False))
+                )
 
             elif ct == LOADER_NODE_CLASS:
                 self.seed_adj.set_value(float(inp.get("seed", 0)))
@@ -600,6 +618,8 @@ class GeneratePage:
                 self.resolution_dropdown, self.resolution_list
             ),
             "portrait": self.portrait_toggle.get_active(),
+            "quality_tags": self.quality_tags_toggle.get_active(),
+            "embeddings": self.embeddings_toggle.get_active(),
             "detailer": DETAILER_OPTIONS[
                 self.detailer_dropdown.get_selected()
             ],
@@ -644,6 +664,14 @@ class GeneratePage:
             )
         if "portrait" in state:
             self.portrait_toggle.set_active(bool(state["portrait"]))
+        if "quality_tags" in state:
+            self.quality_tags_toggle.set_active(
+                bool(state["quality_tags"])
+            )
+        if "embeddings" in state:
+            self.embeddings_toggle.set_active(
+                bool(state["embeddings"])
+            )
         if "detailer" in state and state["detailer"] in DETAILER_OPTIONS:
             self.detailer_dropdown.set_selected(
                 DETAILER_OPTIONS.index(state["detailer"])
@@ -772,6 +800,8 @@ class GeneratePage:
         model = _dd(self.model_dropdown, self.model_list)
         resolution = _dd(self.resolution_dropdown, self.resolution_list)
         portrait = self.portrait_toggle.get_active()
+        quality_tags = self.quality_tags_toggle.get_active()
+        embeddings = self.embeddings_toggle.get_active()
         detailer = DETAILER_OPTIONS[self.detailer_dropdown.get_selected()]
 
         batch_count = int(self.batch_adj.get_value())
@@ -797,6 +827,8 @@ class GeneratePage:
                     )
                     if style:
                         node["inputs"]["style"] = style
+                    node["inputs"]["quality_tags"] = quality_tags
+                    node["inputs"]["embeddings"] = embeddings
                 elif ct == LOADER_NODE_CLASS:
                     node["inputs"]["seed"] = seed
                     if model:
