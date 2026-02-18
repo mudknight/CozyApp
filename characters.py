@@ -2,13 +2,18 @@
 """Characters page: grid of character cards fetched from the server."""
 import requests
 import gi
+import urllib.parse
+import base64
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Adw, GLib, Gdk, Pango  # noqa
+gi.require_version('GdkPixbuf', '2.0')
+
+from gi.repository import Gtk, Adw, GLib, Gdk, Pango, GdkPixbuf  # noqa
 
 SERVER_ADDRESS = "127.0.0.1:8188"
+THUMBNAIL_SIZE = 220
 
 
 class CharacterCard(Gtk.Frame):
@@ -19,31 +24,34 @@ class CharacterCard(Gtk.Frame):
         self.name = name
         self.data = data
         self.on_click = on_click
+        
+        # Ensure the card itself has a fixed square size
+        self.set_size_request(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        vbox.set_margin_top(12)
-        vbox.set_margin_bottom(12)
-        vbox.set_margin_start(12)
-        vbox.set_margin_end(12)
+        # Overlay allows us to stack text on top of the image
+        overlay = Gtk.Overlay()
+        self.set_child(overlay)
+        
+        # Image area
+        self.picture = Gtk.Picture(
+            content_fit=Gtk.ContentFit.COVER,
+            can_shrink=True
+        )
+        self.picture.set_size_request(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+        # Placeholder/Base styling
+        overlay.set_child(self.picture)
 
+        # Info overlay (bottom-aligned)
+        info_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        info_vbox.set_valign(Gtk.Align.END)
+        info_vbox.add_css_class('character-card-info')
+        
         # Name label
         name_label = Gtk.Label(label=name.title())
-        name_label.add_css_class('heading')
+        name_label.add_css_class('character-card-name')
         name_label.set_halign(Gtk.Align.START)
         name_label.set_ellipsize(Pango.EllipsizeMode.END)
-        vbox.append(name_label)
-
-        # Character tags
-        tags_text = data.get('character', '').strip()
-        if tags_text:
-            tags_label = Gtk.Label(label=tags_text)
-            tags_label.add_css_class('dim-label')
-            tags_label.set_halign(Gtk.Align.START)
-            tags_label.set_lines(2)
-            tags_label.set_ellipsize(Pango.EllipsizeMode.END)
-            tags_label.set_wrap(True)
-            tags_label.set_max_width_chars(30)
-            vbox.append(tags_label)
+        info_vbox.append(name_label)
 
         # Category tag (if any)
         categories = data.get('categories', '').strip()
@@ -56,18 +64,64 @@ class CharacterCard(Gtk.Frame):
                 badge = Gtk.Label(label=cat)
                 badge.add_css_class('caption')
                 badge.add_css_class('pill')
-                # A simple pill style
-                badge.set_margin_start(4)
-                badge.set_margin_end(4)
                 cat_box.append(badge)
-            vbox.append(cat_box)
+            info_vbox.append(cat_box)
 
-        self.set_child(vbox)
+        overlay.add_overlay(info_vbox)
 
         # Click handling
         gesture = Gtk.GestureClick()
         gesture.connect('released', self._on_released)
         self.add_controller(gesture)
+        
+        # Start loading image
+        GLib.idle_add(self._load_image)
+
+    def _load_image(self):
+        """Fetch image in a background thread."""
+        def worker():
+            try:
+                # Replicate JS: btoa(unescape(encodeURIComponent(name)))
+                # For UTF-8, this is equivalent to base64 encoding the UTF-8 bytes
+                encoded_name = base64.b64encode(self.name.encode('utf-8')).decode('ascii')
+                url = f"http://{SERVER_ADDRESS}/character_editor/image/{encoded_name}"
+                print(f"[DEBUG] Fetching image for {self.name}: {url}")
+                resp = requests.get(url, timeout=10)
+                print(f"[DEBUG] Response for {self.name}: {resp.status_code}, content-type: {resp.headers.get('content-type')}")
+                if resp.status_code == 200:
+                    data = resp.content
+                    print(f"[DEBUG] Received {len(data)} bytes for {self.name}")
+                    loader = GdkPixbuf.PixbufLoader.new()
+                    loader.write(data)
+                    loader.close()
+                    pixbuf = loader.get_pixbuf()
+                    
+                    if pixbuf:
+                        print(f"[DEBUG] Successfully loaded pixbuf for {self.name} ({pixbuf.get_width()}x{pixbuf.get_height()})")
+                        GLib.idle_add(self._update_image, pixbuf)
+                else:
+                    print(f"[DEBUG] Failed to load image for {self.name}: HTTP {resp.status_code}")
+            except Exception as e:
+                print(f"[DEBUG] Error loading image for {self.name}: {e}")
+
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_image(self, pixbuf):
+        """Update the picture widget with the fetched pixbuf."""
+        # Scale to thumbnail size
+        w, h = pixbuf.get_width(), pixbuf.get_height()
+        scale = max(THUMBNAIL_SIZE / w, THUMBNAIL_SIZE / h)
+        
+        # Convert to texture
+        rowstride = pixbuf.get_rowstride()
+        has_alpha = pixbuf.get_has_alpha()
+        pixels = pixbuf.get_pixels()
+        gbytes = GLib.Bytes.new(pixels)
+        fmt = Gdk.MemoryFormat.R8G8B8A8 if has_alpha else Gdk.MemoryFormat.R8G8B8
+        
+        texture = Gdk.MemoryTexture.new(w, h, fmt, gbytes, rowstride)
+        self.picture.set_paintable(texture)
 
     def _on_released(self, gesture, n_press, x, y):
         if self.on_click:
@@ -121,15 +175,31 @@ class CharactersPage(Gtk.ScrolledWindow):
         css_provider = Gtk.CssProvider()
         css_content = """
             .pill {
-                background-color: alpha(@accent_bg_color, 0.1);
+                background-color: alpha(@accent_bg_color, 0.2);
                 color: @accent_fg_color;
                 border-radius: 12px;
-                padding: 2px 8px;
-                font-size: 0.8em;
+                padding: 1px 6px;
+                font-size: 0.7em;
                 font-weight: bold;
+            }
+            .card {
+                border-radius: 12px;
+                overflow: hidden;
+                border: 1px solid alpha(@view_fg_color, 0.1);
             }
             .card:hover {
                 background-color: alpha(@view_fg_color, 0.05);
+                border-color: alpha(@accent_bg_color, 0.3);
+            }
+            .character-card-info {
+                background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 70%, transparent 100%);
+                padding: 8px;
+                color: white;
+            }
+            .character-card-name {
+                font-weight: bold;
+                font-size: 0.9em;
+                text-shadow: 0 1px 2px rgba(0,0,0,0.5);
             }
         """
         css_provider.load_from_data(css_content, len(css_content))
