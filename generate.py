@@ -369,6 +369,18 @@ class GeneratePage:
             vexpand=True
         )
         scrolled.add_css_class("view")
+
+        # Toggle .prompt-focused on the scrolled window when the
+        # textview gains or loses keyboard focus.
+        focus_ctrl = Gtk.EventControllerFocus()
+        focus_ctrl.connect(
+            "enter", lambda _: scrolled.add_css_class("prompt-focused")
+        )
+        focus_ctrl.connect(
+            "leave", lambda _: scrolled.remove_css_class("prompt-focused")
+        )
+        textview.add_controller(focus_ctrl)
+
         return scrolled, textview
 
     # ------------------------------------------------------------------

@@ -497,6 +497,9 @@ class ComfyWindow(Adw.ApplicationWindow):
                 border-radius: 8px;
                 background-color: @view_bg_color;
             }
+            .prompt-focused {
+                outline: 2px solid @accent_bg_color;
+            }
             gutter {
                 background-color: alpha(@view_fg_color, 0.05);
                 border-right: 1px solid alpha(@view_fg_color, 0.1);
