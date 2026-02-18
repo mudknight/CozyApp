@@ -142,6 +142,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.gallery_selected_pixbuf = None
         self.magnifier_size = 200
         self.magnifier_enabled = False
+        self._preview_user_preference = True
         self.last_cursor_x = 0
         self.last_cursor_y = 0
 
@@ -1018,6 +1019,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         Toggle preview panel visibility.
         """
         is_active = btn.get_active()
+        # Save preference so tab switches don't override the user's choice
+        self._preview_user_preference = is_active
 
         if is_active:
             # Show: enable expansion then reveal
@@ -1748,19 +1751,44 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.picture.set_paintable(self._pixbuf_to_texture(pixbuf))
         self.preview_stack.set_visible_child_name('picture')
 
+    def _set_preview_visible(self, visible):
+        """Show or hide the preview panel and sync the toggle button."""
+        self.preview_revealer.set_hexpand(visible)
+        self.preview_revealer.set_reveal_child(visible)
+        # Disconnect briefly to avoid triggering on_toggle_preview and
+        # overwriting _preview_user_preference
+        self.preview_toggle.handler_block_by_func(
+            self.on_toggle_preview
+        )
+        self.preview_toggle.set_active(visible)
+        self.preview_toggle.handler_unblock_by_func(
+            self.on_toggle_preview
+        )
+
     def _on_tab_changed(self, stack, param):
         """Restore the appropriate preview image when switching tabs."""
         name = stack.get_visible_child_name()
-        if name == 'generate':
-            if self.gen_pixbuf:
-                self._show_pixbuf_in_preview(self.gen_pixbuf)
+        if name in ('generate', 'gallery'):
+            # Restore the user's preference when returning to these tabs
+            self.preview_toggle.set_sensitive(True)
+            self._set_preview_visible(self._preview_user_preference)
+            if name == 'generate':
+                if self.gen_pixbuf:
+                    self._show_pixbuf_in_preview(self.gen_pixbuf)
+                else:
+                    self.preview_stack.set_visible_child_name('picture')
             else:
-                self.preview_stack.set_visible_child_name('picture')
-        elif name == 'gallery':
-            if self.gallery_selected_pixbuf:
-                self._show_pixbuf_in_preview(self.gallery_selected_pixbuf)
-            else:
-                self.preview_stack.set_visible_child_name('placeholder')
+                if self.gallery_selected_pixbuf:
+                    self._show_pixbuf_in_preview(
+                        self.gallery_selected_pixbuf
+                    )
+                else:
+                    self.preview_stack.set_visible_child_name('placeholder')
+        else:
+            # Characters and styles don't use the preview pane — hide it
+            self.preview_toggle.set_sensitive(False)
+            self._set_preview_visible(False)
+            self.preview_stack.set_visible_child_name('placeholder')
 
     def _on_preview_right_click(self, gesture, n_press, x, y):
         """Show context menu on right-click in the preview panel."""
@@ -1959,9 +1987,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         self._show_pixbuf_in_preview(pixbuf)
         # Reveal the preview panel if it's currently hidden
         if not self.preview_revealer.get_reveal_child():
-            self.preview_revealer.set_hexpand(True)
-            self.preview_revealer.set_reveal_child(True)
-            self.preview_toggle.set_active(True)
+            self._preview_user_preference = True
+            self._set_preview_visible(True)
 
     def _on_character_selected(self, name, data):
         """Handle character selection from the Characters tab."""
