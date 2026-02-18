@@ -70,6 +70,7 @@ CLIENT_ID = str(uuid.uuid4())
 PROMPT_NODE_CLASS = "PromptConditioningNode"
 LOADER_NODE_CLASS = "LoaderFullPipe"
 SAVE_NODE_CLASS = "SaveFullPipe"
+BASE_NODE_CLASS = "BaseNode"
 
 
 class ComfyApp(Adw.Application):
@@ -127,6 +128,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.setup_css()
         self.style_list = []
         self.model_list = []
+        self.resolution_list = []
         self.workflow_data = None
         self.tag_completion = TagCompletion(self.log)
         # Active job list; each entry is a dict with keys:
@@ -307,6 +309,44 @@ class ComfyWindow(Adw.ApplicationWindow):
         seed_box.append(self.seed_entry)
         seed_box.append(self.seed_mode_combo)
         self.input_area.append(seed_box)
+
+        res_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
+        )
+        res_box.append(Gtk.Label(label="Resolution", xalign=0))
+        self.resolution_dropdown = Gtk.DropDown.new_from_strings([])
+        self.resolution_dropdown.set_hexpand(True)
+
+        # Ellipsizing factory for resolution dropdown items
+        res_list_factory = Gtk.SignalListItemFactory()
+
+        def setup_res_item(factory, list_item):
+            label = Gtk.Label()
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.set_xalign(0)
+            label.set_max_width_chars(1)
+            list_item.set_child(label)
+
+        def bind_res_item(factory, list_item):
+            label = list_item.get_child()
+            label.set_label(list_item.get_item().get_string())
+
+        res_list_factory.connect("setup", setup_res_item)
+        res_list_factory.connect("bind", bind_res_item)
+        self.resolution_dropdown.set_list_factory(res_list_factory)
+
+        res_btn_factory = Gtk.SignalListItemFactory()
+        res_btn_factory.connect("setup", setup_res_item)
+        res_btn_factory.connect("bind", bind_res_item)
+        self.resolution_dropdown.set_factory(res_btn_factory)
+
+        res_box.append(self.resolution_dropdown)
+        res_box.append(
+            Gtk.Label(label="Portrait", xalign=0, margin_start=10)
+        )
+        self.portrait_toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
+        res_box.append(self.portrait_toggle)
+        self.input_area.append(res_box)
 
         self.pos_buffer = GtkSource.Buffer()
         self.setup_comment_highlighting(self.pos_buffer)
@@ -1004,6 +1044,33 @@ class ComfyWindow(Adw.ApplicationWindow):
                 resp.close()
             except Exception as e:
                 self.log(f"Model metadata fail: {e}")
+
+            try:
+                # Fetch resolution options from BaseNode
+                url = (
+                    f"http://{config.server_address()}/object_info/"
+                    f"{BASE_NODE_CLASS}"
+                )
+                resp = requests.get(url, timeout=3)
+                if resp.status_code == 200:
+                    data = resp.json().get(BASE_NODE_CLASS, {})
+                    inputs = data.get("input", {})
+                    resolutions = None
+                    for cat in ["required", "optional"]:
+                        if "resolution" in inputs.get(cat, {}):
+                            entry = inputs[cat]["resolution"]
+                            resolutions = (
+                                entry[0] if isinstance(entry, list)
+                                and isinstance(entry[0], list) else entry
+                            )
+                            break
+                    if resolutions:
+                        GLib.idle_add(
+                            self.update_resolution_dropdown, resolutions
+                        )
+                resp.close()
+            except Exception as e:
+                self.log(f"Resolution metadata fail: {e}")
         threading.Thread(target=worker, daemon=True).start()
 
     def update_style_dropdown(self, styles):
@@ -1016,6 +1083,15 @@ class ComfyWindow(Adw.ApplicationWindow):
     def update_model_dropdown(self, models):
         self.model_list = models
         self.model_dropdown.set_model(Gtk.StringList.new(models))
+        if self.workflow_data:
+            self.sync_ui_from_json()
+        self.load_saved_state()
+
+    def update_resolution_dropdown(self, resolutions):
+        self.resolution_list = resolutions
+        self.resolution_dropdown.set_model(
+            Gtk.StringList.new(resolutions)
+        )
         if self.workflow_data:
             self.sync_ui_from_json()
         self.load_saved_state()
@@ -1338,6 +1414,14 @@ class ComfyWindow(Adw.ApplicationWindow):
                 if model_val in self.model_list:
                     self.model_dropdown.set_selected(
                         self.model_list.index(model_val))
+            elif node.get("class_type") == BASE_NODE_CLASS:
+                res_val = node["inputs"].get("resolution")
+                if res_val in self.resolution_list:
+                    self.resolution_dropdown.set_selected(
+                        self.resolution_list.index(res_val)
+                    )
+                portrait_val = node["inputs"].get("portrait", False)
+                self.portrait_toggle.set_active(bool(portrait_val))
 
     def save_current_state(self):
         """
@@ -1365,9 +1449,19 @@ class ComfyWindow(Adw.ApplicationWindow):
             else None
         )
 
+        res_idx = self.resolution_dropdown.get_selected()
+        resolution = (
+            self.resolution_list[res_idx]
+            if self.resolution_list and res_idx != Gtk.INVALID_LIST_POSITION
+            else None
+        )
+        portrait = self.portrait_toggle.get_active()
+
         state = {
             "style": style,
             "model": model,
+            "resolution": resolution,
+            "portrait": portrait,
             "positive": pos,
             "negative": neg
         }
@@ -1398,6 +1492,15 @@ class ComfyWindow(Adw.ApplicationWindow):
                 self.model_dropdown.set_selected(
                     self.model_list.index(state["model"])
                 )
+            if (
+                "resolution" in state
+                and state["resolution"] in self.resolution_list
+            ):
+                self.resolution_dropdown.set_selected(
+                    self.resolution_list.index(state["resolution"])
+                )
+            if "portrait" in state:
+                self.portrait_toggle.set_active(bool(state["portrait"]))
 
             self.log("Loaded saved state from state.json")
         except FileNotFoundError:
@@ -1547,6 +1650,14 @@ class ComfyWindow(Adw.ApplicationWindow):
             else None
         )
 
+        res_idx = self.resolution_dropdown.get_selected()
+        resolution = (
+            self.resolution_list[res_idx]
+            if self.resolution_list and res_idx != Gtk.INVALID_LIST_POSITION
+            else None
+        )
+        portrait = self.portrait_toggle.get_active()
+
         batch_count = int(self.batch_adj.get_value())
         randomize = self.seed_mode_combo.get_selected() == 0
 
@@ -1578,6 +1689,10 @@ class ComfyWindow(Adw.ApplicationWindow):
                     node["inputs"]["seed"] = seed
                     if model:
                         node["inputs"]["ckpt_name"] = model
+                elif node.get("class_type") == BASE_NODE_CLASS:
+                    if resolution:
+                        node["inputs"]["resolution"] = resolution
+                    node["inputs"]["portrait"] = portrait
 
             job = {
                 'id': str(uuid.uuid4()),
