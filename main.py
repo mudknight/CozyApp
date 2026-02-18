@@ -573,8 +573,13 @@ class ComfyWindow(Adw.ApplicationWindow):
     def create_overflow_menu(self):
         """Create the overflow menu with settings and about actions."""
         menu = Gio.Menu()
+        menu.append("Reload", "app.reload")
         menu.append("Settings", "app.settings")
         menu.append("About", "app.about")
+
+        reload_action = Gio.SimpleAction.new("reload", None)
+        reload_action.connect("activate", self.on_reload)
+        self.get_application().add_action(reload_action)
 
         settings_action = Gio.SimpleAction.new("settings", None)
         settings_action.connect("activate", self.on_show_settings)
@@ -585,6 +590,12 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.get_application().add_action(about_action)
 
         return menu
+
+    def on_reload(self, action, param):
+        """Reload style/model lists and character/style grids."""
+        self.fetch_node_info()
+        self.characters.fetch_characters()
+        self.styles.fetch_styles()
 
     def on_show_settings(self, action, param):
         """Show the settings dialog."""

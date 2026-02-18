@@ -24,14 +24,14 @@ class CharacterCard(Gtk.Frame):
         self.name = name
         self.data = data
         self.on_click = on_click
-        
+
         # Ensure the card itself has a fixed square size
         self.set_size_request(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
 
         # Overlay allows us to stack text on top of the image
         overlay = Gtk.Overlay()
         self.set_child(overlay)
-        
+
         # Image area
         self.picture = Gtk.Picture(
             content_fit=Gtk.ContentFit.COVER,
@@ -45,7 +45,7 @@ class CharacterCard(Gtk.Frame):
         info_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         info_vbox.set_valign(Gtk.Align.END)
         info_vbox.add_css_class('character-card-info')
-        
+
         # Name label
         name_label = Gtk.Label(label=name.title())
         name_label.add_css_class('character-card-name')
@@ -56,7 +56,8 @@ class CharacterCard(Gtk.Frame):
         # Category tag (if any)
         categories = data.get('categories', '').strip()
         if categories:
-            cat_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            cat_box = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
             for cat in categories.split(','):
                 cat = cat.strip()
                 if not cat:
@@ -73,7 +74,7 @@ class CharacterCard(Gtk.Frame):
         gesture = Gtk.GestureClick()
         gesture.connect('released', self._on_released)
         self.add_controller(gesture)
-        
+
         # Start loading image
         GLib.idle_add(self._load_image)
 
@@ -83,27 +84,29 @@ class CharacterCard(Gtk.Frame):
             try:
                 # Replicate JS: btoa(unescape(encodeURIComponent(name)))
                 # For UTF-8, this is equivalent to base64 encoding the UTF-8 bytes
-                encoded_name = base64.b64encode(self.name.encode('utf-8')).decode('ascii')
+                encoded_name = base64.b64encode(
+                    self.name.encode('utf-8')).decode('ascii')
                 url = (
                     f"http://{config.server_address()}"
                     f"/character_editor/image/{encoded_name}"
                 )
-                print(f"[DEBUG] Fetching image for {self.name}: {url}")
+                # print(f"[DEBUG] Fetching image for {self.name}: {url}")
                 resp = requests.get(url, timeout=10)
-                print(f"[DEBUG] Response for {self.name}: {resp.status_code}, content-type: {resp.headers.get('content-type')}")
+                # print(f"[DEBUG] Response for {self.name}: {resp.status_code}, content-type: {resp.headers.get('content-type')}")
                 if resp.status_code == 200:
                     data = resp.content
-                    print(f"[DEBUG] Received {len(data)} bytes for {self.name}")
+                    # print(f"[DEBUG] Received {len(data)} bytes for {self.name}")
                     loader = GdkPixbuf.PixbufLoader.new()
                     loader.write(data)
                     loader.close()
                     pixbuf = loader.get_pixbuf()
-                    
+
                     if pixbuf:
-                        print(f"[DEBUG] Successfully loaded pixbuf for {self.name} ({pixbuf.get_width()}x{pixbuf.get_height()})")
+                        # print(f"[DEBUG] Successfully loaded pixbuf for {self.name} ({pixbuf.get_width()}x{pixbuf.get_height()})")
                         GLib.idle_add(self._update_image, pixbuf)
                 else:
-                    print(f"[DEBUG] Failed to load image for {self.name}: HTTP {resp.status_code}")
+                    print(
+                        f"[DEBUG] Failed to load image for {self.name}: HTTP {resp.status_code}")
             except Exception as e:
                 print(f"[DEBUG] Error loading image for {self.name}: {e}")
 
@@ -115,14 +118,14 @@ class CharacterCard(Gtk.Frame):
         # Scale to thumbnail size
         w, h = pixbuf.get_width(), pixbuf.get_height()
         scale = max(THUMBNAIL_SIZE / w, THUMBNAIL_SIZE / h)
-        
+
         # Convert to texture
         rowstride = pixbuf.get_rowstride()
         has_alpha = pixbuf.get_has_alpha()
         pixels = pixbuf.get_pixels()
         gbytes = GLib.Bytes.new(pixels)
         fmt = Gdk.MemoryFormat.R8G8B8A8 if has_alpha else Gdk.MemoryFormat.R8G8B8
-        
+
         texture = Gdk.MemoryTexture.new(w, h, fmt, gbytes, rowstride)
         self.picture.set_paintable(texture)
 
@@ -149,7 +152,8 @@ class CharactersPage(Gtk.ScrolledWindow):
             getattr(self.outer, f'set_margin_{side}')(20)
 
         # Search entry
-        self.search_entry = Gtk.SearchEntry(placeholder_text="Search characters...")
+        self.search_entry = Gtk.SearchEntry(
+            placeholder_text="Search characters...")
         self.search_entry.set_margin_bottom(20)
         self.search_entry.connect('search-changed', self._on_search_changed)
         self.outer.append(self.search_entry)
@@ -167,7 +171,7 @@ class CharactersPage(Gtk.ScrolledWindow):
         self.set_child(self.outer)
 
         self.all_characters = {}
-        
+
         # Add CSS for pills and cards
         self._setup_css()
 
@@ -241,7 +245,7 @@ class CharactersPage(Gtk.ScrolledWindow):
         """Update the FlowBox with character cards."""
         self.all_characters = characters
         self._clear_grid()
-        
+
         for name, data in characters.items():
             card = CharacterCard(name, data, self.on_character_selected)
             self.flow.append(card)
@@ -255,7 +259,7 @@ class CharactersPage(Gtk.ScrolledWindow):
 
     def _on_search_changed(self, entry):
         search_text = entry.get_text().lower()
-        
+
         # Iterate over FlowBoxChildren
         child = self.flow.get_first_child()
         while child:
@@ -263,8 +267,8 @@ class CharactersPage(Gtk.ScrolledWindow):
             card = child.get_child()
             if isinstance(card, CharacterCard):
                 visible = search_text in card.name.lower() or \
-                          search_text in card.data.get('character', '').lower() or \
-                          search_text in card.data.get('categories', '').lower()
+                    search_text in card.data.get('character', '').lower() or \
+                    search_text in card.data.get('categories', '').lower()
                 child.set_visible(visible)
             child = child.get_next_sibling()
 
