@@ -23,6 +23,7 @@ from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource, Pango 
 from tag_completion import TagCompletion  # noqa
 from gallery import GalleryPage  # noqa
 from characters import CharactersPage  # noqa
+from styles import StylesPage  # noqa
 
 
 def setup_language_manager():
@@ -541,6 +542,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.view_stack.add_titled_with_icon(
             self.characters.widget, 'characters', 'Characters',
             'avatar-default-symbolic'
+        )
+
+        # Styles page
+        self.styles = StylesPage(
+            on_style_selected=self._on_style_selected,
+            log_fn=self.log
+        )
+        self.view_stack.add_titled_with_icon(
+            self.styles.widget, 'styles', 'Styles',
+            'applications-graphics-symbolic'
         )
 
         self.view_stack.connect(
@@ -1970,6 +1981,20 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         # Switch to generate tab
         self.view_stack.set_visible_child_name('generate')
+
+    def _on_style_selected(self, style_name):
+        """Handle style selection from the Styles tab."""
+        if style_name in self.style_list:
+            index = self.style_list.index(style_name)
+            self.style_dropdown.set_selected(index)
+            
+            # Show a toast
+            self.toast_overlay.add_toast(Adw.Toast.new(f"Style set to {style_name}"))
+            
+            # Switch to generate tab
+            self.view_stack.set_visible_child_name('generate')
+        else:
+            self.log(f"Style {style_name} not found in dropdown list")
 
 
 if __name__ == "__main__":
