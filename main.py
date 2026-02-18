@@ -71,6 +71,9 @@ PROMPT_NODE_CLASS = "PromptConditioningNode"
 LOADER_NODE_CLASS = "LoaderFullPipe"
 SAVE_NODE_CLASS = "SaveFullPipe"
 BASE_NODE_CLASS = "BaseNode"
+UPSCALE_NODE_CLASS = "UpscaleNode"
+DETAILER_NODE_CLASS = "DetailerPipeNode"
+BRANCH_NODE_CLASS = "ImpactConditionalBranch"
 
 
 class ComfyApp(Adw.Application):
@@ -346,6 +349,13 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         self.portrait_toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
         res_box.append(self.portrait_toggle)
+        res_box.append(
+            Gtk.Label(label="Detailer", xalign=0, margin_start=10)
+        )
+        self.detailer_dropdown = Gtk.DropDown.new_from_strings(
+            ["None", "Face", "Nested"]
+        )
+        res_box.append(self.detailer_dropdown)
         self.input_area.append(res_box)
 
         self.pos_buffer = GtkSource.Buffer()
@@ -1398,6 +1408,17 @@ class ComfyWindow(Adw.ApplicationWindow):
     def sync_ui_from_json(self):
         if not self.workflow_data:
             return
+
+        # Find node IDs needed to infer detailer mode
+        upscale_id = next(
+            (nid for nid, n in self.workflow_data.items()
+             if n.get("class_type") == UPSCALE_NODE_CLASS), None
+        )
+        detailer_id = next(
+            (nid for nid, n in self.workflow_data.items()
+             if n.get("class_type") == DETAILER_NODE_CLASS), None
+        )
+
         for node in self.workflow_data.values():
             if node.get("class_type") == PROMPT_NODE_CLASS:
                 self.pos_buffer.set_text(
@@ -1422,6 +1443,16 @@ class ComfyWindow(Adw.ApplicationWindow):
                     )
                 portrait_val = node["inputs"].get("portrait", False)
                 self.portrait_toggle.set_active(bool(portrait_val))
+            elif node.get("class_type") == BRANCH_NODE_CLASS:
+                # Infer detailer mode from branch cond and ff_value target
+                cond = node["inputs"].get("cond", False)
+                ff_src = node["inputs"].get("ff_value", [None])[0]
+                if cond:
+                    self.detailer_dropdown.set_selected(2)  # Nested
+                elif str(ff_src) == str(detailer_id):
+                    self.detailer_dropdown.set_selected(1)  # Face
+                else:
+                    self.detailer_dropdown.set_selected(0)  # None
 
     def save_current_state(self):
         """
@@ -1457,11 +1488,15 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         portrait = self.portrait_toggle.get_active()
 
+        detailer_idx = self.detailer_dropdown.get_selected()
+        detailer = ["None", "Face", "Nested"][detailer_idx]
+
         state = {
             "style": style,
             "model": model,
             "resolution": resolution,
             "portrait": portrait,
+            "detailer": detailer,
             "positive": pos,
             "negative": neg
         }
@@ -1501,6 +1536,11 @@ class ComfyWindow(Adw.ApplicationWindow):
                 )
             if "portrait" in state:
                 self.portrait_toggle.set_active(bool(state["portrait"]))
+            if "detailer" in state:
+                idx = ["None", "Face", "Nested"].index(
+                    state["detailer"]
+                ) if state["detailer"] in ["None", "Face", "Nested"] else 0
+                self.detailer_dropdown.set_selected(idx)
 
             self.log("Loaded saved state from state.json")
         except FileNotFoundError:
@@ -1657,6 +1697,8 @@ class ComfyWindow(Adw.ApplicationWindow):
             else None
         )
         portrait = self.portrait_toggle.get_active()
+        detailer_idx = self.detailer_dropdown.get_selected()
+        detailer = ["None", "Face", "Nested"][detailer_idx]
 
         batch_count = int(self.batch_adj.get_value())
         randomize = self.seed_mode_combo.get_selected() == 0
@@ -1693,6 +1735,37 @@ class ComfyWindow(Adw.ApplicationWindow):
                     if resolution:
                         node["inputs"]["resolution"] = resolution
                     node["inputs"]["portrait"] = portrait
+
+            # Apply detailer mode — requires finding node IDs first
+            upscale_nid = next(
+                (nid for nid, n in workflow_copy.items()
+                 if n.get("class_type") == UPSCALE_NODE_CLASS), None
+            )
+            detailer_nid = next(
+                (nid for nid, n in workflow_copy.items()
+                 if n.get("class_type") == DETAILER_NODE_CLASS), None
+            )
+            branch_node = next(
+                (n for n in workflow_copy.values()
+                 if n.get("class_type") == BRANCH_NODE_CLASS), None
+            )
+            if branch_node and detailer_nid and upscale_nid:
+                if detailer == "None":
+                    # Reroute branch ff_value past DetailerPipeNode
+                    branch_node["inputs"]["cond"] = False
+                    branch_node["inputs"]["ff_value"] = [
+                        upscale_nid, 0
+                    ]
+                elif detailer == "Face":
+                    branch_node["inputs"]["cond"] = False
+                    branch_node["inputs"]["ff_value"] = [
+                        detailer_nid, 0
+                    ]
+                else:  # Nested
+                    branch_node["inputs"]["cond"] = True
+                    branch_node["inputs"]["ff_value"] = [
+                        detailer_nid, 0
+                    ]
 
             job = {
                 'id': str(uuid.uuid4()),
