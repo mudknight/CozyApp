@@ -40,6 +40,20 @@ class TagCompletion:
         self.scrolled = None
         self.current_textview = None
         self.log = log_callback if log_callback else lambda x: None
+        # Set of tags to exclude from completions
+        self._blacklist = set()
+
+    def set_blacklist(self, tags):
+        """
+        Update the tag blacklist.
+
+        Args:
+            tags: Iterable of tag strings to exclude from completions
+        """
+        # Normalise: lowercase and underscores like the tag data
+        self._blacklist = {
+            t.strip().lower().replace(' ', '_') for t in tags if t.strip()
+        }
 
     def load_tags(self, filepath='danbooru.csv'):
         """
@@ -261,6 +275,9 @@ class TagCompletion:
             tl = tag.lower()
             if tl == current:
                 continue
+            # Skip blacklisted tags
+            if tl in self._blacklist:
+                continue
             if tl.startswith(current):
                 prefix_matches.append(tag)
             elif current in tl:
@@ -280,6 +297,9 @@ class TagCompletion:
             for alias, original_tag in self.tag_aliases.items():
                 al = alias.lower()
                 if al == current:
+                    continue
+                # Skip aliases whose target is blacklisted
+                if original_tag.lower() in self._blacklist:
                     continue
                 if al.startswith(current) or current in al:
                     if original_tag not in seen:

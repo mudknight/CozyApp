@@ -96,6 +96,10 @@ class GeneratePage:
         self.tag_completion.load_tags()
         self.tag_completion.load_characters()
         self.tag_completion.load_loras()
+        # Apply any saved blacklist immediately
+        self.tag_completion.set_blacklist(
+            config.get("tag_blacklist") or []
+        )
 
     # ------------------------------------------------------------------
     # UI construction

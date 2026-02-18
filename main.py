@@ -355,27 +355,78 @@ class ComfyWindow(Adw.ApplicationWindow):
         page = Adw.PreferencesPage()
         dialog.add(page)
 
-        group = Adw.PreferencesGroup(
+        # --- Server group ---
+        server_group = Adw.PreferencesGroup(
             title="ComfyUI Server",
             description="Address of the running ComfyUI instance."
         )
-        page.add(group)
+        page.add(server_group)
 
         host_row = Adw.EntryRow(title="Host")
         host_row.set_text(config.get("host"))
-        group.add(host_row)
+        server_group.add(host_row)
 
         port_adj = Gtk.Adjustment(
             value=config.get("port"),
             lower=1, upper=65535, step_increment=1
         )
         port_row = Adw.SpinRow(title="Port", adjustment=port_adj)
-        group.add(port_row)
+        server_group.add(port_row)
+
+        # --- Tag blacklist group ---
+        bl_group = Adw.PreferencesGroup(
+            title="Tag Blacklist",
+            description="Tags listed here are hidden from autocompletion."
+        )
+        page.add(bl_group)
+
+        # Working copy so we can cancel without saving
+        blacklist = list(config.get("tag_blacklist") or [])
+
+        def _add_tag_row(tag):
+            """Append a row for *tag* with an inline remove button."""
+            row = Adw.ActionRow(title=tag)
+            remove_btn = Gtk.Button(
+                icon_name="list-remove-symbolic",
+                valign=Gtk.Align.CENTER,
+                css_classes=["flat", "circular"]
+            )
+            remove_btn.set_tooltip_text("Remove")
+
+            def on_remove(_btn, r=row, t=tag):
+                if t in blacklist:
+                    blacklist.remove(t)
+                bl_group.remove(r)
+
+            remove_btn.connect("clicked", on_remove)
+            row.add_suffix(remove_btn)
+            bl_group.add(row)
+
+        for tag in blacklist:
+            _add_tag_row(tag)
+
+        # Entry row for adding new tags
+        add_row = Adw.EntryRow(title="Add tag…")
+
+        def on_add_tag(entry_row):
+            tag = entry_row.get_text().strip().lower().replace(' ', '_')
+            if tag and tag not in blacklist:
+                blacklist.append(tag)
+                # Insert the new tag row before the entry row
+                _add_tag_row(tag)
+            entry_row.set_text("")
+
+        add_row.connect("apply", on_add_tag)
+        add_row.set_show_apply_button(True)
+        bl_group.add(add_row)
 
         def on_close(_):
             config.set("host", host_row.get_text().strip())
             config.set("port", int(port_adj.get_value()))
+            config.set("tag_blacklist", list(blacklist))
             config.save()
+            # Apply to the live tag completion instance
+            self.generate_page.tag_completion.set_blacklist(blacklist)
 
         dialog.connect("closed", on_close)
         dialog.present(self)

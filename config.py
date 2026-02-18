@@ -8,6 +8,7 @@ _CONFIG_PATH = os.path.expanduser("~/.config/comfyapp/config.json")
 _DEFAULTS = {
     "host": "127.0.0.1",
     "port": 8188,
+    "tag_blacklist": [],
 }
 
 # In-memory config dict, populated by load()
