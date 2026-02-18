@@ -22,6 +22,7 @@ gi.require_version('Pango', '1.0')
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, GtkSource, Pango  # noqa
 from tag_completion import TagCompletion  # noqa
 from gallery import GalleryPage  # noqa
+from characters import CharactersPage  # noqa
 
 
 def setup_language_manager():
@@ -531,6 +532,17 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.gallery.widget, 'gallery', 'Gallery',
             'image-x-generic-symbolic'
         )
+
+        # Characters page
+        self.characters = CharactersPage(
+            on_character_selected=self._on_character_selected,
+            log_fn=self.log
+        )
+        self.view_stack.add_titled_with_icon(
+            self.characters.widget, 'characters', 'Characters',
+            'avatar-default-symbolic'
+        )
+
         self.view_stack.connect(
             'notify::visible-child', self._on_tab_changed
         )
@@ -562,7 +574,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Show the about dialog using Adw.AboutDialog."""
         dialog = Adw.AboutDialog.new()
         dialog.set_application_name("CozyApp")
-        dialog.set_developer_name("Your Name")
+        # dialog.set_developer_name("Your Name")
         dialog.set_version("1.0.0")
         dialog.set_application_icon("com.example.comfy_gen")
         dialog.set_website("https://example.com")
@@ -1939,6 +1951,25 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.preview_revealer.set_hexpand(True)
             self.preview_revealer.set_reveal_child(True)
             self.preview_toggle.set_active(True)
+
+    def _on_character_selected(self, name, data):
+        """Handle character selection from the Characters tab."""
+        # Create the specific tag format requested
+        character_tag = f"character:{name}:default:top, "
+        
+        # Get current text to check for duplicates
+        start, end = self.pos_buffer.get_bounds()
+        current_text = self.pos_buffer.get_text(start, end, False)
+        
+        if character_tag.strip() not in current_text:
+            # Append to the end of the buffer
+            self.pos_buffer.insert(end, character_tag)
+        
+        # Show a toast
+        self.toast_overlay.add_toast(Adw.Toast.new(f"Added {name.title()}"))
+
+        # Switch to generate tab
+        self.view_stack.set_visible_child_name('generate')
 
 
 if __name__ == "__main__":
