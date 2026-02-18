@@ -17,9 +17,7 @@ from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, Pango  # noqa
 import config  # noqa
 from generate import GeneratePage  # noqa
 from gallery import GalleryPage  # noqa
-from characters import CharactersPage  # noqa
-from styles import StylesPage  # noqa
-from tags import TagsPage  # noqa
+from presets import PresetsPage  # noqa
 
 
 def setup_language_manager():
@@ -199,33 +197,15 @@ class ComfyWindow(Adw.ApplicationWindow):
             'image-x-generic-symbolic'
         )
 
-        # Characters page
-        self.characters = CharactersPage(
+        # Presets page (Characters, Styles, Tags combined)
+        self.presets = PresetsPage(
             on_character_selected=self._on_character_selected,
-            log_fn=self.log
-        )
-        self.view_stack.add_titled_with_icon(
-            self.characters.widget, 'characters', 'Characters',
-            'avatar-default-symbolic'
-        )
-
-        # Styles page
-        self.styles = StylesPage(
             on_style_selected=self._on_style_selected,
-            log_fn=self.log
-        )
-        self.view_stack.add_titled_with_icon(
-            self.styles.widget, 'styles', 'Styles',
-            'applications-graphics-symbolic'
-        )
-
-        # Tags page
-        self.tags = TagsPage(
             on_tag_selected=self._on_tag_selected,
             log_fn=self.log
         )
         self.view_stack.add_titled_with_icon(
-            self.tags.widget, 'tags', 'Tags',
+            self.presets.widget, 'presets', 'Presets',
             'bookmark-new-symbolic'
         )
 
@@ -353,11 +333,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         return menu
 
     def on_reload(self, action, param):
-        """Reload style/model lists and character/style/tag grids."""
+        """Reload style/model lists and all preset sub-pages."""
         self.generate_page.fetch_node_info()
-        self.characters.fetch_characters()
-        self.styles.fetch_styles()
-        self.tags.fetch_tags()
+        self.presets.refresh()
 
     def on_show_settings(self, action, param):
         """Show the settings dialog."""
