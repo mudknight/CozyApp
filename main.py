@@ -492,6 +492,11 @@ class ComfyWindow(Adw.ApplicationWindow):
         css_provider = Gtk.CssProvider()
         css_content = """
             .gallery-thumb { border-radius: 8px; }
+            flowboxchild:selected .gallery-thumb {
+                outline: 2px solid @accent_color;
+                box-shadow: 0 0 0 3px alpha(@accent_color, 0.35);
+                border-radius: 8px;
+            }
             revealer { background-color: transparent; border: none; }
             .preview-panel {
                 background-color: @card_bg_color;

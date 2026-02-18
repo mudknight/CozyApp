@@ -191,7 +191,6 @@ class CharactersPage(Gtk.ScrolledWindow):
             }
             .card {
                 border-radius: 12px;
-                overflow: hidden;
                 border: 1px solid alpha(@view_fg_color, 0.1);
             }
             .card:hover {
