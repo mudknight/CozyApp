@@ -139,15 +139,6 @@ class GeneratePage:
 
     def _build_quick_settings(self):
         """Wrap the settings rows in a labeled card section."""
-        header = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL
-        )
-        header.append(Gtk.Label(
-            label="Quick Settings",
-            xalign=0,
-            css_classes=["heading"],
-            hexpand=True
-        ))
         self.node_settings_button = Gtk.Button(
             icon_name="emblem-system-symbolic",
             tooltip_text="Node settings",
@@ -159,14 +150,32 @@ class GeneratePage:
                 self._sidebar.get_root()
             )
         )
-        header.append(self.node_settings_button)
-        self._input_area.append(header)
 
         card = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=0,
             css_classes=["quick-settings-card"]
         )
+
+        # Header row inside the card
+        card_header = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL
+        )
+        card_header.set_margin_start(12)
+        card_header.set_margin_end(12)
+        card_header.set_margin_bottom(6)
+        card_header.set_margin_top(6)
+        card_header.append(Gtk.Label(
+            label="Quick Settings",
+            xalign=0,
+            css_classes=["heading"],
+            hexpand=True
+        ))
+        card_header.append(self.node_settings_button)
+        card.append(card_header)
+        card.append(Gtk.Separator(
+            orientation=Gtk.Orientation.HORIZONTAL,
+        ))
 
         inner = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
