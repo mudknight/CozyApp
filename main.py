@@ -3,6 +3,7 @@ import sys
 import json
 import threading
 import requests
+from urllib.parse import quote
 import tempfile
 import os
 import gi
@@ -725,35 +726,60 @@ class ComfyWindow(Adw.ApplicationWindow):
     # Delete image callback (called from GalleryPage)
     # ------------------------------------------------------------------
 
-    def _on_delete_image(self, image_info, remove_fn):
-        """Delete a generated image via the ComfyUI api-tools endpoint."""
+    def _on_delete_image(self, image_info, cache_path, remove_fn):
+        """Remove an image from the gallery, cache, and ComfyUI server."""
         def worker():
+            # Always remove from gallery and delete the local cache files
+            GLib.idle_add(remove_fn)
+            if cache_path:
+                try:
+                    cache_path.unlink(missing_ok=True)
+                    sidecar = cache_path.with_suffix('.json')
+                    sidecar.unlink(missing_ok=True)
+                except Exception as e:
+                    self.log(f"Cache delete error: {e}")
+
+            # Server deletion requires image_info with a filename
             if not image_info or not image_info.get('filename'):
-                GLib.idle_add(
-                    self._show_toast,
-                    'No filename metadata — cannot delete this image.'
-                )
                 return
 
             filename = image_info['filename']
+            subfolder = image_info.get('subfolder', '')
+            # %2F-encode the subfolder separator so the slash survives
+            # aiohttp route matching but is decoded into match_info,
+            # giving ComfyUI the full relative path it needs to locate
+            # the file via exists_annotated_filepath.
+            remote_path = quote(
+                f"{subfolder}/{filename}" if subfolder else filename,
+                safe=''
+            )
             url = (
                 f"http://{config.server_address()}"
-                f"/api-tools/v1/images/output/{filename}"
+                f"/api-tools/v1/images/output/{remote_path}"
             )
             try:
                 resp = requests.delete(url, timeout=10)
-                if resp.status_code == 200:
-                    GLib.idle_add(remove_fn)
-                    GLib.idle_add(self._show_toast, f'Deleted {filename}')
-                elif resp.status_code == 404:
+                # The API always returns HTTP 200; real status is in body
+                body = resp.json()
+                if body.get('code') == 200:
+                    GLib.idle_add(
+                        self._show_toast, f'Deleted {filename}'
+                    )
+                elif body.get('code') == 404:
                     GLib.idle_add(
                         self._show_toast,
-                        'Install ComfyUI-api-tools to enable deletion'
+                        'Install ComfyUI-api-tools to enable '
+                        'server-side deletion'
                     )
                 else:
                     GLib.idle_add(
                         self._show_toast,
-                        f'Delete failed (HTTP {resp.status_code})'
+                        f'Server delete failed: '
+                        f'{body.get("message", resp.status_code)}'
+                    )
+                    GLib.idle_add(
+                        self._show_toast,
+                        f'Server delete failed (HTTP {resp.status_code})'
                     )
             except Exception as e:
                 GLib.idle_add(self._show_toast, f'Delete error: {e}')

@@ -515,6 +515,7 @@ class GalleryPage(Gtk.ScrolledWindow):
         """Request deletion of each child, calling the delete callback."""
         for child in children:
             image_info = getattr(child, '_image_info', None)
+            cache_path = self._cache_path_from_child(child)
 
             def make_remove(c):
                 def remove():
@@ -524,7 +525,9 @@ class GalleryPage(Gtk.ScrolledWindow):
                 return remove
 
             if self._on_delete_image:
-                self._on_delete_image(image_info, make_remove(child))
+                self._on_delete_image(
+                    image_info, cache_path, make_remove(child)
+                )
             else:
                 make_remove(child)()
 
