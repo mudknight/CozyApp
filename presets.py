@@ -73,7 +73,7 @@ class PresetsPage(Gtk.Box):
         self.inner_stack.add_titled_with_icon(
             self.tags.widget,
             'tags', 'Tags',
-            'bookmark-new-symbolic'
+            'view-list-symbolic'
         )
 
     def refresh(self):

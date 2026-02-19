@@ -206,7 +206,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         self.view_stack.add_titled_with_icon(
             self.presets.widget, 'presets', 'Presets',
-            'bookmark-new-symbolic'
+            'user-bookmarks-symbolic'
         )
 
         self.view_stack.connect(
