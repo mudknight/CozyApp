@@ -691,10 +691,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         """
         paths = image_cache.list_images()
         for path in paths:
-            # No ComfyUI image_info for pre-existing cache files;
-            # deletion via the server API won't work for these entries,
-            # but local gallery removal still will.
-            self.gallery.add_image(path, image_info=None)
+            image_info = image_cache.load_image_info(path)
+            self.gallery.add_image(path, image_info=image_info)
 
     # ------------------------------------------------------------------
     # Image update callbacks (called from GeneratePage)
@@ -720,7 +718,7 @@ class ComfyWindow(Adw.ApplicationWindow):
     def update_image_final(self, data, image_info=None):
         """Display the final image and add it to the gallery."""
         self.update_image(data)
-        cache_path = image_cache.save_image(data)
+        cache_path = image_cache.save_image(data, image_info)
         self.gallery.add_image(cache_path, image_info)
 
     # ------------------------------------------------------------------
