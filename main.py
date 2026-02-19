@@ -526,11 +526,14 @@ class ComfyWindow(Adw.ApplicationWindow):
             }
             textview.view {
                 border: none;
-                border-radius: 8px;
                 background-color: @view_bg_color;
             }
-            .prompt-focused {
+            scrolledwindow.prompt-scroll {
+                border-radius: 8px;
+            }
+            scrolledwindow.prompt-focused {
                 outline: 2px solid @accent_bg_color;
+                border-radius: 8px;
             }
             .quick-settings-card {
                 background-color: @card_bg_color;

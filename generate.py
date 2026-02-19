@@ -485,9 +485,10 @@ class GeneratePage:
         scrolled = Gtk.ScrolledWindow(
             child=textview,
             propagate_natural_height=False,
-            vexpand=True
+            vexpand=True,
+            css_classes=["view", "prompt-scroll"]
         )
-        scrolled.add_css_class("view")
+        scrolled.set_overflow(Gtk.Overflow.HIDDEN)
 
         # Toggle .prompt-focused on the scrolled window when the
         # textview gains or loses keyboard focus.
