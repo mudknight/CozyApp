@@ -100,6 +100,13 @@ class GeneratePage:
         self.is_processing = False
         self.debounce_timers = []
 
+        # Stop control: event signals the queue loop to exit,
+        # _active_ws holds the live socket so stop() can close it
+        # immediately and unblock any blocking ws.recv() call.
+        self._stop_requested = threading.Event()
+        self._active_ws = None
+        self._active_ws_lock = threading.Lock()
+
         self._build_ui()
 
         self.tag_completion.load_tags()
@@ -1011,6 +1018,18 @@ class GeneratePage:
     # ------------------------------------------------------------------
 
     def on_stop_clicked(self, _):
+        """Stop the current job only; pending jobs continue afterwards."""
+        # Flag lets _generate_logic suppress the expected socket error
+        self._stop_requested.set()
+
+        # Close the active websocket so ws.recv() unblocks immediately
+        with self._active_ws_lock:
+            if self._active_ws is not None:
+                try:
+                    self._active_ws.close()
+                except Exception:
+                    pass
+
         try:
             requests.post(
                 f"http://{config.server_address()}/interrupt",
@@ -1231,6 +1250,8 @@ class GeneratePage:
                     pass
                 self.current_job_id = None
             GLib.idle_add(self._remove_job_row_widget, job)
+            # Clear stop flag so the next pending job runs normally
+            self._stop_requested.clear()
 
         self.is_processing = False
         GLib.idle_add(self.stop_button.set_sensitive, False)
@@ -1265,6 +1286,8 @@ class GeneratePage:
     def _generate_logic(self, workflow_data):
         """Execute a single generation request over WebSocket."""
         ws = websocket.WebSocket()
+        with self._active_ws_lock:
+            self._active_ws = ws
         try:
             exec_order = self._topo_sort(workflow_data)
             node_index = {nid: i for i, nid in enumerate(exec_order)}
@@ -1358,8 +1381,13 @@ class GeneratePage:
                     break
 
         except Exception as e:
-            self.log(f"Gen error: {e}")
+            # A closed socket raises an error when stop is requested;
+            # only log genuine errors.
+            if not self._stop_requested.is_set():
+                self.log(f"Gen error: {e}")
         finally:
+            with self._active_ws_lock:
+                self._active_ws = None
             try:
                 ws.close()
             except Exception:
