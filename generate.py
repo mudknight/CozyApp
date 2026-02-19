@@ -138,7 +138,30 @@ class GeneratePage:
         self._build_button_row()
 
     def _build_quick_settings(self):
-        """Wrap the settings rows in a labeled card section."""
+        """Wrap the settings rows in a collapsible labeled card section."""
+        card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+            css_classes=["quick-settings-card"]
+        )
+
+        # --- Header row ---
+        card_header = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=10
+        )
+        card_header.set_margin_start(12)
+        card_header.set_margin_end(12)
+        card_header.set_margin_top(6)
+        card_header.set_margin_bottom(6)
+
+        card_header.append(Gtk.Label(
+            label="Quick Settings",
+            xalign=0,
+            css_classes=["heading"]
+        ))
+
+        # Node settings button sits immediately after the label
         self.node_settings_button = Gtk.Button(
             icon_name="emblem-system-symbolic",
             tooltip_text="Node settings",
@@ -150,33 +173,30 @@ class GeneratePage:
                 self._sidebar.get_root()
             )
         )
+        card_header.append(self.node_settings_button)
 
-        card = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=0,
-            css_classes=["quick-settings-card"]
+        # Spacer pushes the collapse button to the far right
+        card_header.append(Gtk.Box(hexpand=True))
+
+        # Collapse toggle button on the far right
+        self._qs_expanded = True
+        self._qs_toggle_btn = Gtk.Button(
+            icon_name="pan-up-symbolic",
+            tooltip_text="Collapse",
+            css_classes=["flat", "circular"]
         )
+        self._qs_toggle_btn.connect("clicked", self._on_qs_toggle)
+        card_header.append(self._qs_toggle_btn)
 
-        # Header row inside the card
-        card_header = Gtk.Box(
+        card.append(card_header)
+
+        # Separator shown only when expanded
+        self._qs_separator = Gtk.Separator(
             orientation=Gtk.Orientation.HORIZONTAL
         )
-        card_header.set_margin_start(12)
-        card_header.set_margin_end(12)
-        card_header.set_margin_bottom(6)
-        card_header.set_margin_top(6)
-        card_header.append(Gtk.Label(
-            label="Quick Settings",
-            xalign=0,
-            css_classes=["heading"],
-            hexpand=True
-        ))
-        card_header.append(self.node_settings_button)
-        card.append(card_header)
-        card.append(Gtk.Separator(
-            orientation=Gtk.Orientation.HORIZONTAL,
-        ))
+        card.append(self._qs_separator)
 
+        # Revealer wraps the inner rows
         inner = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=10
@@ -187,8 +207,28 @@ class GeneratePage:
         inner.append(self._build_style_model_row())
         inner.append(self._build_seed_row())
         inner.append(self._build_options_row())
-        card.append(inner)
+
+        self._qs_revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+            transition_duration=200,
+            reveal_child=True
+        )
+        self._qs_revealer.set_child(inner)
+        card.append(self._qs_revealer)
+
         self._input_area.append(card)
+
+    def _on_qs_toggle(self, _):
+        """Toggle the quick settings revealer and update the icon."""
+        self._qs_expanded = not self._qs_expanded
+        self._qs_revealer.set_reveal_child(self._qs_expanded)
+        self._qs_separator.set_visible(self._qs_expanded)
+        self._qs_toggle_btn.set_icon_name(
+            "pan-up-symbolic" if self._qs_expanded else "pan-down-symbolic"
+        )
+        self._qs_toggle_btn.set_tooltip_text(
+            "Collapse" if self._qs_expanded else "Expand"
+        )
 
     def _build_style_model_row(self):
         box = Gtk.Box(
