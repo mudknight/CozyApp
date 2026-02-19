@@ -500,6 +500,14 @@ class ComfyWindow(Adw.ApplicationWindow):
             .prompt-focused {
                 outline: 2px solid @accent_bg_color;
             }
+            .quick-settings-card {
+                background-color: @card_bg_color;
+                border-radius: 12px;
+                border: 1px solid alpha(currentColor, 0.07);
+            }
+            .quick-settings-card:hover {
+                background-color: @card_bg_color;
+            }
             gutter {
                 background-color: alpha(@view_fg_color, 0.05);
                 border-right: 1px solid alpha(@view_fg_color, 0.1);

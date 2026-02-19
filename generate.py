@@ -133,11 +133,53 @@ class GeneratePage:
         self._input_area.set_margin_bottom(10)
         self._sidebar.append(self._input_area)
 
-        self._build_style_model_row()
-        self._build_seed_row()
-        self._build_options_row()
+        self._build_quick_settings()
         self._build_prompt_area()
         self._build_button_row()
+
+    def _build_quick_settings(self):
+        """Wrap the settings rows in a labeled card section."""
+        header = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL
+        )
+        header.append(Gtk.Label(
+            label="Quick Settings",
+            xalign=0,
+            css_classes=["heading"],
+            hexpand=True
+        ))
+        self.node_settings_button = Gtk.Button(
+            icon_name="emblem-system-symbolic",
+            tooltip_text="Node settings",
+            css_classes=["flat", "circular"]
+        )
+        self.node_settings_button.connect(
+            "clicked",
+            lambda _: self.show_node_settings_dialog(
+                self._sidebar.get_root()
+            )
+        )
+        header.append(self.node_settings_button)
+        self._input_area.append(header)
+
+        card = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+            css_classes=["quick-settings-card"]
+        )
+
+        inner = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=10
+        )
+        for side in ("top", "bottom", "start", "end"):
+            getattr(inner, f"set_margin_{side}")(12)
+
+        inner.append(self._build_style_model_row())
+        inner.append(self._build_seed_row())
+        inner.append(self._build_options_row())
+        card.append(inner)
+        self._input_area.append(card)
 
     def _build_style_model_row(self):
         box = Gtk.Box(
@@ -162,7 +204,7 @@ class GeneratePage:
         self.model_dropdown.set_factory(_make_ellipsize_factory())
         box.append(self.model_dropdown)
 
-        self._input_area.append(box)
+        return box
 
     def _build_seed_row(self):
         box = Gtk.Box(
@@ -180,7 +222,7 @@ class GeneratePage:
         )
         box.append(self.seed_entry)
         box.append(self.seed_mode_combo)
-        self._input_area.append(box)
+        return box
 
     def _build_options_row(self):
         box = Gtk.Box(
@@ -221,7 +263,7 @@ class GeneratePage:
         )
         box.append(self.detailer_dropdown)
 
-        self._input_area.append(box)
+        return box
 
     def _build_prompt_area(self):
         self.pos_buffer = GtkSource.Buffer()
@@ -259,17 +301,6 @@ class GeneratePage:
         )
         self.stop_button.connect("clicked", self.on_stop_clicked)
         self.stop_button.set_sensitive(False)
-
-        self.node_settings_button = Gtk.Button(
-            icon_name="emblem-system-symbolic",
-            tooltip_text="Node settings"
-        )
-        self.node_settings_button.connect(
-            "clicked",
-            lambda _: self.show_node_settings_dialog(
-                self._sidebar.get_root()
-            )
-        )
 
         self.batch_adj = Gtk.Adjustment(
             value=1, lower=1, upper=99, step_increment=1
@@ -355,7 +386,6 @@ class GeneratePage:
 
         btn_box.append(self.queue_box)
         btn_box.append(self.progress_bar)
-        btn_box.append(self.node_settings_button)
         btn_box.append(self.stop_button)
         btn_box.append(self.queue_group)
         self._input_area.append(btn_box)
