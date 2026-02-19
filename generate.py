@@ -853,6 +853,7 @@ class GeneratePage:
             "node_settings": self.node_settings,
             "positive": pos,
             "negative": neg,
+            "qs_expanded": self._qs_expanded,
         }
         try:
             with open("state.json", "w", encoding="utf-8") as f:
@@ -911,6 +912,18 @@ class GeneratePage:
                     self.node_settings[section].update(
                         saved_ns[section]
                     )
+        # Restore quick settings revealer state
+        if "qs_expanded" in state:
+            expanded = bool(state["qs_expanded"])
+            self._qs_expanded = expanded
+            self._qs_revealer.set_reveal_child(expanded)
+            self._qs_separator.set_visible(expanded)
+            self._qs_toggle_btn.set_icon_name(
+                "pan-up-symbolic" if expanded else "pan-down-symbolic"
+            )
+            self._qs_toggle_btn.set_tooltip_text(
+                "Collapse" if expanded else "Expand"
+            )
         self.log("Loaded saved state from state.json")
 
     # ------------------------------------------------------------------
