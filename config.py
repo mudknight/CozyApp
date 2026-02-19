@@ -9,6 +9,7 @@ _DEFAULTS = {
     "host": "127.0.0.1",
     "port": 8188,
     "tag_blacklist": [],
+    "cache_max_age_days": 1,
 }
 
 # In-memory config dict, populated by load()

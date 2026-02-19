@@ -15,6 +15,7 @@ gi.require_version('Pango', '1.0')
 
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, Pango  # noqa
 import config  # noqa
+import image_cache  # noqa
 from generate import GeneratePage  # noqa
 from gallery import GalleryPage  # noqa
 from presets import PresetsPage  # noqa
@@ -118,7 +119,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Preview state
         self.current_pixbuf = None
         self.gen_pixbuf = None
-        self.gallery_selected_pixbuf = None
+        # Cache path of the gallery image currently shown in the preview
+        self.gallery_selected_path = None
         self.magnifier_size = 200
         self.magnifier_enabled = False
         self._preview_user_preference = True
@@ -215,6 +217,14 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.setup_keybinds()
         self.generate_page.fetch_node_info()
+
+        # Purge cached images older than the configured threshold
+        image_cache.cleanup_old(config.get("cache_max_age_days"))
+
+        # Populate gallery from disk cache in a background thread
+        threading.Thread(
+            target=self._load_cached_images, daemon=True
+        ).start()
 
         if self.workflow_file:
             self.generate_page.load_workflow(self.workflow_file)
@@ -363,6 +373,24 @@ class ComfyWindow(Adw.ApplicationWindow):
         port_row = Adw.SpinRow(title="Port", adjustment=port_adj)
         server_group.add(port_row)
 
+        # --- Cache group ---
+        cache_group = Adw.PreferencesGroup(
+            title="Image Cache",
+            description=(
+                "Cached images older than this are deleted on startup."
+            )
+        )
+        page.add(cache_group)
+
+        cache_adj = Gtk.Adjustment(
+            value=config.get("cache_max_age_days"),
+            lower=1, upper=365, step_increment=1
+        )
+        cache_row = Adw.SpinRow(
+            title="Max cache age (days)", adjustment=cache_adj
+        )
+        cache_group.add(cache_row)
+
         # --- Tag blacklist group ---
         bl_group = Adw.PreferencesGroup(
             title="Tag Blacklist",
@@ -413,6 +441,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         def on_close(_):
             config.set("host", host_row.get_text().strip())
             config.set("port", int(port_adj.get_value()))
+            config.set(
+                "cache_max_age_days", int(cache_adj.get_value())
+            )
             config.set("tag_blacklist", list(blacklist))
             config.save()
             # Apply to the live tag completion instance
@@ -572,6 +603,17 @@ class ComfyWindow(Adw.ApplicationWindow):
     # Preview panel helpers
     # ------------------------------------------------------------------
 
+    def _load_pixbuf(self, path):
+        """Load a GdkPixbuf from a cache path; returns None on failure."""
+        try:
+            loader = GdkPixbuf.PixbufLoader.new()
+            loader.write(path.read_bytes())
+            loader.close()
+            return loader.get_pixbuf()
+        except Exception as e:
+            self.log(f"Preview load error: {e}")
+            return None
+
     def _pixbuf_to_texture(self, pixbuf):
         """Convert a GdkPixbuf to a Gdk.MemoryTexture."""
         width = pixbuf.get_width()
@@ -629,9 +671,9 @@ class ComfyWindow(Adw.ApplicationWindow):
                 else:
                     self.preview_stack.set_visible_child_name('picture')
             else:
-                if self.gallery_selected_pixbuf:
+                if self.gallery_selected_path:
                     self._show_pixbuf_in_preview(
-                        self.gallery_selected_pixbuf
+                        self._load_pixbuf(self.gallery_selected_path)
                     )
                 else:
                     self.preview_stack.set_visible_child_name('placeholder')
@@ -639,6 +681,20 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.preview_toggle.set_sensitive(False)
             self._set_preview_visible(False)
             self.preview_stack.set_visible_child_name('placeholder')
+
+    def _load_cached_images(self):
+        """
+        Load images from the disk cache into the gallery.
+
+        Runs in a background thread; each add_image call schedules
+        itself onto the main thread via GLib.idle_add internally.
+        """
+        paths = image_cache.list_images()
+        for path in paths:
+            # No ComfyUI image_info for pre-existing cache files;
+            # deletion via the server API won't work for these entries,
+            # but local gallery removal still will.
+            self.gallery.add_image(path, image_info=None)
 
     # ------------------------------------------------------------------
     # Image update callbacks (called from GeneratePage)
@@ -664,7 +720,8 @@ class ComfyWindow(Adw.ApplicationWindow):
     def update_image_final(self, data, image_info=None):
         """Display the final image and add it to the gallery."""
         self.update_image(data)
-        self.gallery.add_image(data, image_info)
+        cache_path = image_cache.save_image(data)
+        self.gallery.add_image(cache_path, image_info)
 
     # ------------------------------------------------------------------
     # Delete image callback (called from GalleryPage)
@@ -719,9 +776,9 @@ class ComfyWindow(Adw.ApplicationWindow):
     # Cross-page callbacks
     # ------------------------------------------------------------------
 
-    def _view_gallery_image(self, pixbuf):
+    def _view_gallery_image(self, pixbuf, cache_path):
         """Show a gallery thumbnail in the shared preview panel."""
-        self.gallery_selected_pixbuf = pixbuf
+        self.gallery_selected_path = cache_path
         self._show_pixbuf_in_preview(pixbuf)
         if not self.preview_revealer.get_reveal_child():
             self._preview_user_preference = True
@@ -948,9 +1005,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         pixbuf = self.current_pixbuf
         if pixbuf is None:
             return
-        if self.gallery_selected_pixbuf is pixbuf:
-            self.gallery.delete_by_pixbuf(pixbuf)
-            self.gallery_selected_pixbuf = None
+        if self.gallery_selected_path is not None:
+            self.gallery.delete_by_cache_path(self.gallery_selected_path)
+            self.gallery_selected_path = None
         if self.gen_pixbuf is pixbuf:
             self.gen_pixbuf = None
         self.current_pixbuf = None

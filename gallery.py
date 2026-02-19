@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Gallery page: thumbnail grid with multi-select and context menus."""
 import os
-import tempfile
+from pathlib import Path
 import gi
 
 gi.require_version('Gtk', '4.0')
@@ -90,19 +90,19 @@ class GalleryPage(Gtk.ScrolledWindow):
         """Return the top-level widget to pack into the view stack."""
         return self._overlay
 
-    def add_image(self, data: bytes, image_info: dict = None):
-        """Add raw image bytes to the gallery (thread-safe)."""
-        GLib.idle_add(self._add_image_idle, data, image_info)
+    def add_image(self, cache_path: Path, image_info: dict = None):
+        """Add a cached image to the gallery by path (thread-safe)."""
+        GLib.idle_add(self._add_image_idle, cache_path, image_info)
 
-    def delete_by_pixbuf(self, pixbuf):
+    def delete_by_cache_path(self, cache_path: Path):
         """
-        Find the gallery item whose pixbuf is *pixbuf* and delete it.
+        Find the gallery item with the given cache path and delete it.
 
         Used by the preview context menu when the shown image was
         selected from the gallery.
         """
         for child in self._get_all_children():
-            if self._pixbuf_from_child(child) is pixbuf:
+            if self._cache_path_from_child(child) == cache_path:
                 self._delete_children([child])
                 break
 
@@ -110,8 +110,15 @@ class GalleryPage(Gtk.ScrolledWindow):
     # Adding thumbnails
     # ------------------------------------------------------------------
 
-    def _add_image_idle(self, data: bytes, image_info: dict):
+    def _add_image_idle(self, cache_path: Path, image_info: dict):
         """Create thumbnail, prepend to grid (runs on main thread)."""
+        # Load bytes transiently just to build the thumbnail
+        try:
+            data = cache_path.read_bytes()
+        except Exception as e:
+            print(f"Gallery: failed to read cache file: {e}", flush=True)
+            return False
+
         pixbuf = self._pixbuf_from_bytes(data)
         if pixbuf is None:
             return False
@@ -120,6 +127,8 @@ class GalleryPage(Gtk.ScrolledWindow):
 
         thumb = self._scale_pixbuf(pixbuf, THUMBNAIL_SIZE)
         texture = self._texture_from_pixbuf(thumb)
+        # Full-res pixbuf no longer kept in RAM
+        del pixbuf
 
         picture = Gtk.Picture(
             paintable=texture,
@@ -127,8 +136,8 @@ class GalleryPage(Gtk.ScrolledWindow):
             can_shrink=True
         )
         picture.set_size_request(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
-        # Store full-res pixbuf for preview and context menu
-        picture._full_pixbuf = pixbuf
+        # Store path instead of full-res pixbuf
+        picture._cache_path = cache_path
 
         frame = Gtk.Frame(css_classes=['gallery-thumb'])
         frame.set_child(picture)
@@ -229,18 +238,13 @@ class GalleryPage(Gtk.ScrolledWindow):
         if len(selected) != 1:
             return
         child = selected[0]
-        # Sync the GTK focus/cursor with the selection
-        index = child.get_index()
-        self._flow.select_child(child)
-        # Using select_child is not enough to move the keyboard cursor.
-        # We need to tell the FlowBox to move its "cursor" to this child.
-        # GTK4 doesn't have a direct 'set_cursor' for FlowBox, but we can
-        # use the internal child activation or focus management.
         self._flow.set_focus_child(child)
-        
+
+        # Lazy-load full-res pixbuf from disk for the preview callback
+        path = self._cache_path_from_child(child)
         pixbuf = self._pixbuf_from_child(child)
         if pixbuf and self._on_view_image:
-            self._on_view_image(pixbuf)
+            self._on_view_image(pixbuf, path)
 
     def _get_num_columns(self):
         """Count columns by comparing y-allocations of consecutive items."""
@@ -422,58 +426,37 @@ class GalleryPage(Gtk.ScrolledWindow):
         self.get_clipboard().set_content(content)
 
     def _copy_multiple_to_clipboard(self, pixbufs):
-        """Copy multiple pixbufs to the system clipboard as files."""
-        # Many apps (like Telegram) prefer a list of files for multi-image paste.
-        temp_files = []
+        """Copy multiple images to the clipboard using their cache paths."""
+        selected = self._flow.get_selected_children()
         file_list = []
-
-        for i, pb in enumerate(pixbufs):
-            try:
-                # Create a temporary file that persists long enough for the paste
-                tmp = tempfile.NamedTemporaryFile(suffix=f"_{i}.png", delete=False)
-                tmp.close()
-                path = tmp.name
-                pb.savev(path, "png", [], [])
-                
-                temp_files.append(path)
-                file_list.append(Gio.File.new_for_path(path))
-            except Exception as e:
-                print(f"Failed to create temp file for clipboard: {e}")
+        for child in selected:
+            path = self._cache_path_from_child(child)
+            if path and path.exists():
+                file_list.append(Gio.File.new_for_path(str(path)))
 
         if not file_list:
             return
 
-        # Create a FileList (GDK4) and a ContentProvider for it
+        # Build a FileList for apps that accept file drops (e.g. Telegram)
         gdk_file_list = Gdk.FileList.new_from_list(file_list)
         content = Gdk.ContentProvider.new_for_value(gdk_file_list)
-        
-        # We also provide a union with the first image's texture/png 
-        # as a fallback for apps that don't handle file lists.
+
+        # Fallback: first image as PNG bytes and texture for other apps
         first_pb = pixbufs[0]
         texture = self._texture_from_pixbuf(first_pb)
         success, buffer = first_pb.save_to_bufferv("png", [], [])
-        
-        fallback_providers = [content]
-        fallback_providers.append(Gdk.ContentProvider.new_for_value(texture))
+
+        fallback_providers = [content,
+                              Gdk.ContentProvider.new_for_value(texture)]
         if success:
             fallback_providers.append(
-                Gdk.ContentProvider.new_for_bytes("image/png", GLib.Bytes.new(buffer))
+                Gdk.ContentProvider.new_for_bytes(
+                    "image/png", GLib.Bytes.new(buffer)
+                )
             )
-            
+
         union_content = Gdk.ContentProvider.new_union(fallback_providers)
         self.get_clipboard().set_content(union_content)
-
-        # Cleanup: we can't delete immediately because the paste is asynchronous.
-        # We'll schedule a cleanup after a reasonable delay (30 seconds).
-        def cleanup():
-            for f in temp_files:
-                try:
-                    os.unlink(f)
-                except:
-                    pass
-            return False
-
-        GLib.timeout_add_seconds(30, cleanup)
 
     def _save_single(self, pixbuf, anchor):
         """Show a file-save dialog for a single image."""
@@ -546,18 +529,29 @@ class GalleryPage(Gtk.ScrolledWindow):
                 make_remove(child)()
 
     # ------------------------------------------------------------------
-    # Child pixbuf helper
+    # Child helpers
     # ------------------------------------------------------------------
 
-    def _pixbuf_from_child(self, child):
-        """Extract stored pixbuf from FlowBoxChild > Frame > Picture."""
+    def _cache_path_from_child(self, child):
+        """Extract the stored cache path from a FlowBoxChild."""
         frame = child.get_child()
         if frame is None:
             return None
         picture = frame.get_child()
-        if picture is None or not hasattr(picture, '_full_pixbuf'):
+        if picture is None or not hasattr(picture, '_cache_path'):
             return None
-        return picture._full_pixbuf
+        return picture._cache_path
+
+    def _pixbuf_from_child(self, child):
+        """Lazy-load a full-res pixbuf from the child's cache path."""
+        path = self._cache_path_from_child(child)
+        if path is None:
+            return None
+        try:
+            return self._pixbuf_from_bytes(path.read_bytes())
+        except Exception as e:
+            print(f"Gallery: failed to load image: {e}", flush=True)
+            return None
 
     # ------------------------------------------------------------------
     # Static helpers
