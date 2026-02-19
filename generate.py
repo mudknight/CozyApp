@@ -16,6 +16,7 @@ gi.require_version('Pango', '1.0')
 from gi.repository import Gtk, Adw, GLib, Gdk, GtkSource, Pango  # noqa
 import config  # noqa
 from tag_completion import TagCompletion  # noqa
+from node_settings import NodeSettingsDialog, default_node_settings  # noqa
 
 CLIENT_ID = str(uuid.uuid4())
 
@@ -26,6 +27,7 @@ SAVE_NODE_CLASS = "SaveFullPipe"
 BASE_NODE_CLASS = "BaseNode"
 UPSCALE_NODE_CLASS = "UpscaleNode"
 DETAILER_NODE_CLASS = "DetailerPipeNode"
+NESTED_DETAILER_NODE_CLASS = "NestedDetailerPipeNode"
 BRANCH_NODE_CLASS = "ImpactConditionalBranch"
 
 DETAILER_OPTIONS = ["None", "Face", "Nested"]
@@ -80,7 +82,14 @@ class GeneratePage:
         self.style_list = []
         self.model_list = []
         self.resolution_list = []
+        self.sampler_list = []
+        self.scheduler_list = []
+        self.bbox_model_list = []
+        self.fallback_model_list = []
+        self.upscale_model_list = []
+        self.upscale_method_list = []
         self.workflow_data = None
+        self.node_settings = default_node_settings()
 
         self.tag_completion = TagCompletion(self.log)
 
@@ -251,6 +260,17 @@ class GeneratePage:
         self.stop_button.connect("clicked", self.on_stop_clicked)
         self.stop_button.set_sensitive(False)
 
+        self.node_settings_button = Gtk.Button(
+            icon_name="emblem-system-symbolic",
+            tooltip_text="Node settings"
+        )
+        self.node_settings_button.connect(
+            "clicked",
+            lambda _: self.show_node_settings_dialog(
+                self._sidebar.get_root()
+            )
+        )
+
         self.batch_adj = Gtk.Adjustment(
             value=1, lower=1, upper=99, step_increment=1
         )
@@ -335,6 +355,7 @@ class GeneratePage:
 
         btn_box.append(self.queue_box)
         btn_box.append(self.progress_bar)
+        btn_box.append(self.node_settings_button)
         btn_box.append(self.stop_button)
         btn_box.append(self.queue_group)
         self._input_area.append(btn_box)
@@ -473,6 +494,66 @@ class GeneratePage:
             BASE_NODE_CLASS, "resolution",
             self.update_resolution_dropdown, "Resolution metadata"
         )
+        # Fetch enum lists used by the node settings dialog.
+        # Use BaseNode rather than KSampler so custom schedulers/samplers
+        # registered by custom nodes are included.
+        samplers = self._fetch_enum(BASE_NODE_CLASS, 'sampler_name')
+        schedulers = self._fetch_enum(BASE_NODE_CLASS, 'scheduler')
+        bbox = self._fetch_enum('DetailerPipeNode', 'bbox_model')
+        fallback = self._fetch_enum(
+            'DetailerPipeNode', 'fallback_model'
+        )
+        up_models = self._fetch_enum(
+            'DetailerPipeNode', 'upscale_model'
+        )
+        up_methods = self._fetch_enum(
+            'DetailerPipeNode', 'upscale_method'
+        )
+        GLib.idle_add(
+            self._store_enum_lists,
+            samplers, schedulers, bbox, fallback, up_models, up_methods
+        )
+
+    def _fetch_enum(self, node_class, key):
+        """Fetch a single enum list from object_info; return [] on fail."""
+        try:
+            url = (
+                f"http://{config.server_address()}"
+                f"/object_info/{node_class}"
+            )
+            resp = requests.get(url, timeout=3)
+            if resp.status_code != 200:
+                return []
+            data = resp.json().get(node_class, {})
+            inputs = data.get("input", {})
+            for cat in ("required", "optional"):
+                entry = inputs.get(cat, {}).get(key)
+                if entry is None:
+                    continue
+                # Standard enum: [["a", "b", ...], {...}]
+                if (isinstance(entry, list)
+                        and isinstance(entry[0], list)):
+                    return entry[0]
+                # COMBO with options dict: [["COMBO"], {"options": [...]}]
+                if (isinstance(entry, list) and len(entry) > 1
+                        and isinstance(entry[1], dict)
+                        and "options" in entry[1]):
+                    return entry[1]["options"]
+            resp.close()
+        except Exception as e:
+            self.log(f"Enum fetch {node_class}/{key}: {e}")
+        return []
+
+    def _store_enum_lists(
+        self, samplers, schedulers, bbox, fallback, up_models, up_methods
+    ):
+        """Store fetched enum lists (called on the main thread)."""
+        self.sampler_list = samplers
+        self.scheduler_list = schedulers
+        self.bbox_model_list = bbox
+        self.fallback_model_list = fallback
+        self.upscale_model_list = up_models
+        self.upscale_method_list = up_methods
 
     def _fetch_input_list(self, node_class, key, callback, label):
         """Fetch a single enum input list from object_info."""
@@ -524,6 +605,27 @@ class GeneratePage:
         if self.workflow_data:
             self.sync_ui_from_json()
         self.load_saved_state()
+
+    # ------------------------------------------------------------------
+    # Node settings dialog
+    # ------------------------------------------------------------------
+
+    def show_node_settings_dialog(self, parent):
+        """Open the tabbed node settings dialog."""
+        NodeSettingsDialog(
+            node_settings=self.node_settings,
+            on_close=self.save_current_state,
+            sampler_list=self.sampler_list,
+            scheduler_list=self.scheduler_list,
+            bbox_model_list=self.bbox_model_list,
+            fallback_model_list=self.fallback_model_list,
+            upscale_model_list=self.upscale_model_list,
+            upscale_method_list=self.upscale_method_list,
+        ).show(parent)
+
+    # ------------------------------------------------------------------
+    # Workflow sync / state persistence
+    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # Workflow sync / state persistence
@@ -580,6 +682,52 @@ class GeneratePage:
                 self.portrait_toggle.set_active(
                     bool(inp.get("portrait", False))
                 )
+                ns = self.node_settings["base"]
+                ns["sampler_name"] = inp.get(
+                    "sampler_name", ns["sampler_name"]
+                )
+                ns["scheduler"] = inp.get("scheduler", ns["scheduler"])
+                ns["steps"] = inp.get("steps", ns["steps"])
+                ns["cfg"] = inp.get("cfg", ns["cfg"])
+                ns["denoise"] = inp.get("denoise", ns["denoise"])
+
+            elif ct == UPSCALE_NODE_CLASS:
+                ns = self.node_settings["upscale"]
+                ns["sampler_name"] = inp.get(
+                    "sampler_name", ns["sampler_name"]
+                )
+                ns["scheduler"] = inp.get("scheduler", ns["scheduler"])
+                ns["steps"] = inp.get("steps", ns["steps"])
+                ns["cfg"] = inp.get("cfg", ns["cfg"])
+                ns["denoise"] = inp.get("denoise", ns["denoise"])
+                ns["upscale_model"] = inp.get(
+                    "upscale_model", ns["upscale_model"]
+                )
+                ns["scale_by"] = inp.get("scale_by", ns["scale_by"])
+
+            elif ct == DETAILER_NODE_CLASS:
+                ns = self.node_settings["detailer"]
+                for key in (
+                    "bbox_model", "fallback_model", "threshold",
+                    "steps", "cfg", "sampler", "scheduler", "denoise",
+                    "upscale_method", "upscale_model",
+                    "feather", "context_padding"
+                ):
+                    if key in inp:
+                        ns[key] = inp[key]
+
+            elif ct == NESTED_DETAILER_NODE_CLASS:
+                ns = self.node_settings["nested"]
+                for key in (
+                    "face_model", "eyes_pair_model", "eye_single_model",
+                    "threshold", "cfg", "sampler", "scheduler",
+                    "face_steps", "face_denoise", "face_scale",
+                    "eye_steps", "eye_denoise", "eye_scale",
+                    "upscale_method", "max_megapixels",
+                    "feather", "context_padding"
+                ):
+                    if key in inp:
+                        ns[key] = inp[key]
 
             elif ct == BRANCH_NODE_CLASS:
                 # Infer detailer mode from cond and ff_value target
@@ -623,6 +771,7 @@ class GeneratePage:
             "detailer": DETAILER_OPTIONS[
                 self.detailer_dropdown.get_selected()
             ],
+            "node_settings": self.node_settings,
             "positive": pos,
             "negative": neg,
         }
@@ -676,6 +825,13 @@ class GeneratePage:
             self.detailer_dropdown.set_selected(
                 DETAILER_OPTIONS.index(state["detailer"])
             )
+        if "node_settings" in state:
+            saved_ns = state["node_settings"]
+            for section in self.node_settings:
+                if section in saved_ns:
+                    self.node_settings[section].update(
+                        saved_ns[section]
+                    )
         self.log("Loaded saved state from state.json")
 
     # ------------------------------------------------------------------
@@ -837,6 +993,70 @@ class GeneratePage:
                     if resolution:
                         node["inputs"]["resolution"] = resolution
                     node["inputs"]["portrait"] = portrait
+                    bns = self.node_settings["base"]
+                    node["inputs"]["sampler_name"] = bns["sampler_name"]
+                    node["inputs"]["scheduler"] = bns["scheduler"]
+                    node["inputs"]["steps"] = int(bns["steps"])
+                    node["inputs"]["cfg"] = bns["cfg"]
+                    node["inputs"]["denoise"] = bns["denoise"]
+                elif ct == UPSCALE_NODE_CLASS:
+                    uns = self.node_settings["upscale"]
+                    node["inputs"]["sampler_name"] = uns["sampler_name"]
+                    node["inputs"]["scheduler"] = uns["scheduler"]
+                    node["inputs"]["steps"] = int(uns["steps"])
+                    node["inputs"]["cfg"] = uns["cfg"]
+                    node["inputs"]["denoise"] = uns["denoise"]
+                    node["inputs"]["upscale_model"] = uns["upscale_model"]
+                    node["inputs"]["scale_by"] = uns["scale_by"]
+                elif ct == DETAILER_NODE_CLASS:
+                    dns = self.node_settings["detailer"]
+                    node["inputs"]["bbox_model"] = dns["bbox_model"]
+                    node["inputs"]["fallback_model"] = (
+                        dns["fallback_model"]
+                    )
+                    node["inputs"]["threshold"] = dns["threshold"]
+                    node["inputs"]["steps"] = int(dns["steps"])
+                    node["inputs"]["cfg"] = dns["cfg"]
+                    node["inputs"]["sampler"] = dns["sampler"]
+                    node["inputs"]["scheduler"] = dns["scheduler"]
+                    node["inputs"]["denoise"] = dns["denoise"]
+                    node["inputs"]["upscale_method"] = (
+                        dns["upscale_method"]
+                    )
+                    node["inputs"]["upscale_model"] = dns["upscale_model"]
+                    node["inputs"]["feather"] = dns["feather"]
+                    node["inputs"]["context_padding"] = (
+                        dns["context_padding"]
+                    )
+                elif ct == NESTED_DETAILER_NODE_CLASS:
+                    nns = self.node_settings["nested"]
+                    node["inputs"]["face_model"] = nns["face_model"]
+                    node["inputs"]["eyes_pair_model"] = (
+                        nns["eyes_pair_model"]
+                    )
+                    node["inputs"]["eye_single_model"] = (
+                        nns["eye_single_model"]
+                    )
+                    node["inputs"]["threshold"] = nns["threshold"]
+                    node["inputs"]["cfg"] = nns["cfg"]
+                    node["inputs"]["sampler"] = nns["sampler"]
+                    node["inputs"]["scheduler"] = nns["scheduler"]
+                    node["inputs"]["face_steps"] = int(nns["face_steps"])
+                    node["inputs"]["face_denoise"] = nns["face_denoise"]
+                    node["inputs"]["face_scale"] = nns["face_scale"]
+                    node["inputs"]["eye_steps"] = int(nns["eye_steps"])
+                    node["inputs"]["eye_denoise"] = nns["eye_denoise"]
+                    node["inputs"]["eye_scale"] = nns["eye_scale"]
+                    node["inputs"]["upscale_method"] = (
+                        nns["upscale_method"]
+                    )
+                    node["inputs"]["max_megapixels"] = (
+                        nns["max_megapixels"]
+                    )
+                    node["inputs"]["feather"] = nns["feather"]
+                    node["inputs"]["context_padding"] = (
+                        nns["context_padding"]
+                    )
 
             # Apply detailer mode by patching the branch node
             upscale_nid = next(

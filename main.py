@@ -492,7 +492,7 @@ class ComfyWindow(Adw.ApplicationWindow):
                 background-color: @card_bg_color;
                 border-left: none;
             }
-            .view {
+            textview.view {
                 border: none;
                 border-radius: 8px;
                 background-color: @view_bg_color;
