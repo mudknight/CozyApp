@@ -38,9 +38,11 @@ class PresetsPage(Gtk.Box):
         )
         switcher.set_margin_top(8)
         switcher.set_margin_bottom(8)
+        switcher.set_margin_start(8)
+        switcher.set_margin_end(8)
         self.append(switcher)
 
-        self.append(Gtk.Separator())
+        # self.append(Gtk.Separator())
         self.append(self.inner_stack)
 
         # Characters sub-page
