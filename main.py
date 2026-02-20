@@ -64,7 +64,7 @@ from gi.repository import GtkSource  # noqa
 class ComfyApp(Adw.Application):
     def __init__(self, **kwargs):
         super().__init__(
-            application_id="com.example.comfy_gen",
+            application_id="com.mudknight.cozyapp",
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
             **kwargs
         )
@@ -495,14 +495,14 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Show the about dialog."""
         dialog = Adw.AboutDialog.new()
         dialog.set_application_name("CozyApp")
+        dialog.set_developer_name("mudknight")
         dialog.set_version("1.0.0")
-        dialog.set_application_icon("com.example.comfy_gen")
-        dialog.set_website("https://example.com")
-        dialog.set_issue_url("https://github.com/example/cozyapp/issues")
+        dialog.set_application_icon("com.mudknight.cozyapp")
+        dialog.set_issue_url("https://github.com/mudknight/cozyapp/issues")
         dialog.set_license_type(Gtk.License.MIT_X11)
-        dialog.set_comments("A simple GTK4 application with an about page.")
+        dialog.set_comments("Cozy alternative to the ComfyUI web interface.")
         dialog.add_acknowledgement_section(
-            "Contributors", ["Contributor 1", "Contributor 2"]
+            "Contributors", ["mudkngiht"]
         )
         dialog.present(self)
 
