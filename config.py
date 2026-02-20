@@ -3,7 +3,9 @@
 import json
 import os
 
-_CONFIG_PATH = os.path.expanduser("~/.config/comfyapp/config.json")
+_CONFIG_DIR = os.path.expanduser("~/.config/cozyapp")
+_CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.json")
+_STATE_PATH = os.path.join(_CONFIG_DIR, "state.json")
 
 _DEFAULTS = {
     "host": "127.0.0.1",
@@ -34,11 +36,33 @@ def load():
 def save():
     """Persist the current config to disk."""
     try:
-        os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
+        os.makedirs(_CONFIG_DIR, exist_ok=True)
         with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(_config, f, indent=2)
     except Exception as e:
         print(f"Config save error: {e}", flush=True)
+
+
+def load_state() -> dict:
+    """Load state from disk; returns an empty dict if missing."""
+    try:
+        with open(_STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"State load error: {e}", flush=True)
+        return {}
+
+
+def save_state(state: dict):
+    """Persist state dict to disk."""
+    try:
+        os.makedirs(_CONFIG_DIR, exist_ok=True)
+        with open(_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"State save error: {e}", flush=True)
 
 
 def get(key):

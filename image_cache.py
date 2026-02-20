@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 # Cache root and image subdirectory
-_CACHE_DIR = Path(os.path.expanduser("~/.cache/ComfyApp/images"))
+_CACHE_DIR = Path(os.path.expanduser("~/.cache/cozyapp/images"))
 
 
 def _ensure_dir():

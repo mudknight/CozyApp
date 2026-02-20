@@ -863,21 +863,12 @@ class GeneratePage:
             "negative": neg,
             "qs_expanded": self._qs_expanded,
         }
-        try:
-            with open("state.json", "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2)
-        except Exception as e:
-            self.log(f"Error saving state: {e}")
+        config.save_state(state)
 
     def load_saved_state(self):
         """Restore input values from state.json if it exists."""
-        try:
-            with open("state.json", "r", encoding="utf-8") as f:
-                state = json.load(f)
-        except FileNotFoundError:
-            return
-        except Exception as e:
-            self.log(f"Error loading state: {e}")
+        state = config.load_state()
+        if not state:
             return
 
         if "positive" in state:
@@ -932,7 +923,7 @@ class GeneratePage:
             self._qs_toggle_btn.set_tooltip_text(
                 "Collapse" if expanded else "Expand"
             )
-        self.log("Loaded saved state from state.json")
+        self.log("Loaded saved state")
 
     # ------------------------------------------------------------------
     # Queue management
