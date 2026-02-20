@@ -277,21 +277,40 @@ class TagCompletion:
                 ]
                 return matches[:10]
 
-            # Handle character completion: character:name
+            # Handle character completion (depth-aware)
             prefix, search = current.rsplit(':', 1)
             prefix = prefix.strip().lower()
             search = search.strip().lower()
 
             if prefix == 'character':
+                # depth 1: completing character name
                 if not search:
-                    # Return all characters if nothing typed yet
                     return self.characters[:10]
-                # Substring match against the name only (after last /)
                 matches = [
                     char for char in self.characters
                     if search in char.split('/')[-1].lower()
                 ]
                 return matches[:10]
+
+            if prefix.startswith('character:'):
+                # depth 2 (outfit) or depth 3 (top/bottom)
+                parts = prefix.split(':')
+                if len(parts) == 2:
+                    # depth 2: completing outfit name
+                    outfits = self._get_outfits(parts[1])
+                    if not search:
+                        return outfits[:10]
+                    return [
+                        o for o in outfits if search in o.lower()
+                    ][:10]
+                elif len(parts) == 3:
+                    # depth 3: completing top or bottom
+                    options = ['top', 'bottom']
+                    if not search:
+                        return options
+                    return [
+                        o for o in options if o.startswith(search)
+                    ]
 
             # Handle tag preset completion: tag:name
             if prefix == 'tag':
@@ -355,6 +374,54 @@ class TagCompletion:
                         break
 
         return matches[:10]
+
+    def _get_outfits(self, character_name):
+        """
+        Return outfit names for a character.
+
+        Args:
+            character_name: Character name string
+
+        Returns:
+            List of outfit name strings
+        """
+        # Only 'default' exists for now; expand when outfit
+        # support is added to the API
+        return ['default']
+
+    def _strip_character_colon(self, textview):
+        """
+        If the cursor is mid-character-flow at depth >= 2 and the
+        current token ends with ':', strip that trailing colon and
+        close the tag with ', '.
+
+        Args:
+            textview: GtkSourceView containing the buffer
+        """
+        buffer = textview.get_buffer()
+        cursor_mark = buffer.get_insert()
+        iter_cursor = buffer.get_iter_at_mark(cursor_mark)
+
+        iter_start = iter_cursor.copy()
+        while not iter_start.starts_line():
+            iter_start.backward_char()
+            if iter_start.get_char() in ',\n':
+                iter_start.forward_char()
+                break
+
+        # Skip leading whitespace after comma
+        while iter_start.get_char() in ' \t':
+            iter_start.forward_char()
+
+        text = buffer.get_text(iter_start, iter_cursor, False)
+
+        # Only act when inside character flow at depth >= 2
+        # and the token ends with a bare colon
+        if (text.lower().startswith('character:')
+                and text.count(':') >= 2
+                and text.endswith(':')):
+            buffer.delete(iter_start, iter_cursor)
+            buffer.insert(iter_start, text[:-1] + ', ')
 
     def _create_popup(self, textview):
         """
@@ -609,10 +676,35 @@ class TagCompletion:
             buffer.insert(iter_start, 'tag:')
             GLib.idle_add(self.show_popup, textview, self.tag_presets[:10])
         elif is_character:
-            # For characters, keep as-is and preserve the prefix
-            formatted_tag = f"character:{tag}"
-            buffer.delete(iter_start, iter_cursor)
-            buffer.insert(iter_start, formatted_tag + ", ")
+            # Depth-aware: count colons to determine flow stage
+            depth = replaced_text.count(':')
+            parts = replaced_text.split(':')
+
+            if depth == 1:
+                # Completed name → append colon, show outfit list
+                outfits = self._get_outfits(tag)
+                buffer.delete(iter_start, iter_cursor)
+                buffer.insert(iter_start, f'character:{tag}:')
+                GLib.idle_add(self.show_popup, textview, outfits)
+            elif depth == 2:
+                # Completed outfit → append colon, show top/bottom
+                char_name = parts[1]
+                buffer.delete(iter_start, iter_cursor)
+                buffer.insert(
+                    iter_start, f'character:{char_name}:{tag}:'
+                )
+                GLib.idle_add(
+                    self.show_popup, textview, ['top', 'bottom']
+                )
+            elif depth == 3:
+                # Completed top/bottom → close out the tag
+                char_name = parts[1]
+                outfit = parts[2]
+                buffer.delete(iter_start, iter_cursor)
+                buffer.insert(
+                    iter_start,
+                    f'character:{char_name}:{outfit}:{tag}, '
+                )
         elif is_tag_preset:
             # For tag presets, preserve the tag: prefix
             formatted_tag = f"tag:{tag}"
@@ -699,6 +791,8 @@ class TagCompletion:
 
         if keyval == Gdk.KEY_Escape:
             self.completion_popup.popdown()
+            # Strip trailing colon if we're mid-character-flow
+            self._strip_character_colon(textview)
             return True
         elif keyval == Gdk.KEY_Down:
             selected = self.listbox.get_selected_row()
