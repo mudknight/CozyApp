@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 """Gallery page: thumbnail grid with multi-select and context menus."""
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import gi
 
@@ -11,6 +13,8 @@ gi.require_version('GdkPixbuf', '2.0')
 from gi.repository import Gtk, Adw, Gdk, GdkPixbuf, GLib, Gio  # noqa
 
 THUMBNAIL_SIZE = 220
+# Images added per main-loop idle callback during batch load
+_LOAD_BATCH_SIZE = 20
 
 
 class GalleryPage(Gtk.ScrolledWindow):
@@ -133,6 +137,68 @@ class GalleryPage(Gtk.ScrolledWindow):
             cache_path, image_info,
             w, h, rowstride, has_alpha, pixels
         )
+
+    def add_images_batch(self, images: list):
+        """
+        Add multiple cached images efficiently (thread-safe).
+
+        images: list of (cache_path, image_info) tuples, oldest-first.
+        Decodes all thumbnails in parallel then adds them in
+        _LOAD_BATCH_SIZE chunks to avoid blocking the main loop.
+        """
+        if not images:
+            return
+        threading.Thread(
+            target=self._decode_batch, args=(images,), daemon=True
+        ).start()
+
+    def _decode_batch(self, images: list):
+        """Background: decode all thumbnails in parallel, then schedule."""
+        def decode_one(args):
+            idx, (cache_path, image_info) = args
+            try:
+                data = cache_path.read_bytes()
+            except Exception as e:
+                print(
+                    f"Gallery: read error {cache_path.name}: {e}",
+                    flush=True
+                )
+                return None
+            pixbuf = self._pixbuf_from_bytes(data)
+            if pixbuf is None:
+                return None
+            thumb = self._scale_pixbuf(pixbuf, THUMBNAIL_SIZE)
+            return (
+                idx, cache_path, image_info,
+                thumb.get_width(), thumb.get_height(),
+                thumb.get_rowstride(), thumb.get_has_alpha(),
+                bytes(thumb.get_pixels())
+            )
+
+        workers = os.cpu_count() or 4
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            raw = list(pool.map(decode_one, enumerate(images)))
+
+        # Discard failures and restore original (oldest-first) order
+        results = sorted(
+            (r for r in raw if r is not None),
+            key=lambda r: r[0]
+        )
+
+        # Schedule widget creation in chunks
+        for i in range(0, len(results), _LOAD_BATCH_SIZE):
+            chunk = results[i:i + _LOAD_BATCH_SIZE]
+            GLib.idle_add(self._add_chunk_idle, chunk)
+
+    def _add_chunk_idle(self, chunk: list):
+        """Main thread: create thumbnail widgets for one chunk."""
+        self._placeholder.set_visible(False)
+        for entry in chunk:
+            _, cache_path, image_info, w, h, rs, alpha, px = entry
+            self._add_image_idle(
+                cache_path, image_info, w, h, rs, alpha, px
+            )
+        return False
 
     def clear(self):
         """Remove all children from the gallery and show placeholder."""

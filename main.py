@@ -734,13 +734,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         """
         Load images from the disk cache into the gallery.
 
-        Runs in a background thread; each add_image call schedules
-        itself onto the main thread via GLib.idle_add internally.
+        Builds the (path, image_info) list on this thread then hands
+        it to add_images_batch, which decodes in parallel and
+        schedules widget creation in chunks on the main thread.
         """
         paths = image_cache.list_images()
-        for path in paths:
-            image_info = image_cache.load_image_info(path)
-            self.gallery.add_image(path, image_info=image_info)
+        images = [
+            (path, image_cache.load_image_info(path))
+            for path in paths
+        ]
+        self.gallery.add_images_batch(images)
 
     # ------------------------------------------------------------------
     # Image update callbacks (called from GeneratePage)
