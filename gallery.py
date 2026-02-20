@@ -37,6 +37,9 @@ class GalleryPage(Gtk.ScrolledWindow):
         # Active context popover (kept to dismiss on re-open)
         self._active_popover = None
 
+        # Scroll to top whenever the gallery tab is shown
+        self.connect('map', lambda _: self.get_vadjustment().set_value(0))
+
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         for side in ['top', 'bottom', 'start', 'end']:
             getattr(outer, f'set_margin_{side}')(12)
