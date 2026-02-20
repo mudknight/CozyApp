@@ -16,7 +16,10 @@ THUMBNAIL_SIZE = 220
 class GalleryPage(Gtk.ScrolledWindow):
     """Scrollable FlowBox grid with multi-selection and context menus."""
 
-    def __init__(self, on_view_image=None, on_delete_image=None):
+    def __init__(
+        self, on_view_image=None,
+        on_delete_image=None, on_clear_gallery=None
+    ):
         super().__init__(
             hscrollbar_policy=Gtk.PolicyType.NEVER,
             vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
@@ -27,6 +30,8 @@ class GalleryPage(Gtk.ScrolledWindow):
         self._on_view_image = on_view_image
         # Called with (image_info, remove_fn) for each deleted item
         self._on_delete_image = on_delete_image
+        # Called with no args when the user confirms clearing the gallery
+        self._on_clear_gallery = on_clear_gallery
         # Tracks the last single-activated child for shift-range select
         self._last_activated_child = None
         # Active context popover (kept to dismiss on re-open)
@@ -73,6 +78,7 @@ class GalleryPage(Gtk.ScrolledWindow):
         self._overlay.set_child(self)
         self._placeholder.set_visible(True)
         self._overlay.add_overlay(self._placeholder)
+
 
     def grab_focus(self):
         """Focus the flowbox or its selected child."""
@@ -124,6 +130,13 @@ class GalleryPage(Gtk.ScrolledWindow):
             cache_path, image_info,
             w, h, rowstride, has_alpha, pixels
         )
+
+    def clear(self):
+        """Remove all children from the gallery and show placeholder."""
+        for child in self._get_all_children():
+            self._flow.remove(child)
+        self._last_activated_child = None
+        self._placeholder.set_visible(True)
 
     def delete_by_cache_path(self, cache_path: Path):
         """

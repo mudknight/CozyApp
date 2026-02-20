@@ -193,7 +193,8 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Gallery page
         self.gallery = GalleryPage(
             on_view_image=self._view_gallery_image,
-            on_delete_image=self._on_delete_image
+            on_delete_image=self._on_delete_image,
+            on_clear_gallery=self._on_clear_gallery
         )
         self.view_stack.add_titled_with_icon(
             self.gallery.widget, 'gallery', 'Gallery',
@@ -324,8 +325,9 @@ class ComfyWindow(Adw.ApplicationWindow):
     def create_overflow_menu(self):
         """Create the overflow menu and register its actions."""
         menu = Gio.Menu()
-        menu.append("Reload", "app.reload")
         menu.append("Settings", "app.settings")
+        menu.append("Reload", "app.reload")
+        menu.append("Clear Cache", "app.clear_cache")
         menu.append("About", "app.about")
 
         reload_action = Gio.SimpleAction.new("reload", None)
@@ -336,11 +338,48 @@ class ComfyWindow(Adw.ApplicationWindow):
         settings_action.connect("activate", self.on_show_settings)
         self.get_application().add_action(settings_action)
 
+        clear_cache_action = Gio.SimpleAction.new("clear_cache", None)
+        clear_cache_action.connect("activate", self.on_clear_cache)
+        self.get_application().add_action(clear_cache_action)
+
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self.on_show_about)
         self.get_application().add_action(about_action)
 
         return menu
+
+    def on_clear_cache(self, action, param):
+        """Show a confirmation dialog then delete all cached images."""
+        dialog = Adw.AlertDialog(
+            heading='Clear Cache?',
+            body=(
+                'This will delete all cached images from disk. '
+                'Images on the server will not be affected.'
+            )
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('clear', 'Clear')
+        dialog.set_response_appearance(
+            'clear', Adw.ResponseAppearance.DESTRUCTIVE
+        )
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+        dialog.connect('response', self._on_clear_cache_response)
+        dialog.present(self)
+
+    def _on_clear_cache_response(self, dialog, response):
+        """Clear gallery and delete cache files if confirmed."""
+        if response != 'clear':
+            return
+        paths = [
+            p for p in (
+                self.gallery._cache_path_from_child(c)
+                for c in self.gallery._get_all_children()
+            )
+            if p is not None
+        ]
+        self.gallery.clear()
+        self._on_clear_gallery(paths)
 
     def on_reload(self, action, param):
         """Reload style/model lists and all preset sub-pages."""
@@ -807,6 +846,31 @@ class ComfyWindow(Adw.ApplicationWindow):
     # ------------------------------------------------------------------
     # Cross-page callbacks
     # ------------------------------------------------------------------
+
+    def _on_clear_gallery(self, cache_paths):
+        """Reset preview and delete local cache files for all images."""
+        self.gallery_selected_path = None
+        self.current_pixbuf = None
+        self.preview_stack.set_visible_child_name('placeholder')
+
+        def worker():
+            errors = 0
+            for path in cache_paths:
+                try:
+                    path.unlink(missing_ok=True)
+                    path.with_suffix('.json').unlink(missing_ok=True)
+                except Exception as e:
+                    self.log(f'Cache delete error: {e}')
+                    errors += 1
+            msg = (
+                f'Cleared {len(cache_paths)} images'
+                if not errors
+                else
+                f'Cleared gallery ({errors} file(s) could not be deleted)'
+            )
+            GLib.idle_add(self._show_toast, msg)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _view_gallery_image(self, pixbuf, cache_path):
         """Show a gallery thumbnail in the shared preview panel."""
