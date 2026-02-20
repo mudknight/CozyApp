@@ -286,7 +286,7 @@ class CharactersPage(Gtk.ScrolledWindow):
     # API helpers                                                          #
     # ------------------------------------------------------------------ #
 
-    def _post_characters(self, characters):
+    def _post_characters(self, characters, on_done=None):
         """POST the full characters dict back to the server."""
         def worker():
             try:
@@ -296,6 +296,8 @@ class CharactersPage(Gtk.ScrolledWindow):
                 )
                 resp = requests.post(url, json=characters, timeout=5)
                 if resp.status_code == 200:
+                    if on_done:
+                        on_done()
                     GLib.idle_add(self.fetch_characters)
                 else:
                     self.log(f"Save failed: {resp.status_code}")
@@ -304,7 +306,7 @@ class CharactersPage(Gtk.ScrolledWindow):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _rename_character(self, old_name, new_name, data):
+    def _rename_character(self, old_name, new_name, data, on_done=None):
         """Use the rename endpoint (also moves the image)."""
         def worker():
             try:
@@ -319,6 +321,8 @@ class CharactersPage(Gtk.ScrolledWindow):
                 }
                 resp = requests.post(url, json=payload, timeout=5)
                 if resp.status_code == 200:
+                    if on_done:
+                        on_done()
                     GLib.idle_add(self.fetch_characters)
                 else:
                     self.log(
@@ -326,6 +330,56 @@ class CharactersPage(Gtk.ScrolledWindow):
                     )
             except Exception as e:
                 self.log(f"Error renaming character: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_image(self, name, img_bytes, remove_img):
+        """Upload or delete a character image based on dialog state."""
+        if img_bytes:
+            self._upload_image(name, img_bytes)
+        elif remove_img:
+            self._delete_image_api(name)
+
+    def _upload_image(self, name, raw_bytes):
+        """POST raw image bytes to the character image endpoint."""
+        def worker():
+            try:
+                encoded_name = base64.b64encode(
+                    name.encode('utf-8')
+                ).decode('ascii')
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/character_editor/image/{encoded_name}"
+                )
+                payload = {
+                    'image': base64.b64encode(raw_bytes).decode('ascii')
+                }
+                resp = requests.post(url, json=payload, timeout=15)
+                if resp.status_code == 200:
+                    GLib.idle_add(self.fetch_characters)
+                else:
+                    self.log(
+                        f"Image upload failed: {resp.status_code}"
+                    )
+            except Exception as e:
+                self.log(f"Error uploading image: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _delete_image_api(self, name):
+        """DELETE the image for a character."""
+        def worker():
+            try:
+                encoded_name = base64.b64encode(
+                    name.encode('utf-8')
+                ).decode('ascii')
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/character_editor/image/{encoded_name}"
+                )
+                requests.delete(url, timeout=5)
+            except Exception as e:
+                self.log(f"Error deleting image: {e}")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -356,18 +410,22 @@ class CharactersPage(Gtk.ScrolledWindow):
 
     def _on_add_clicked(self, _btn):
         crud_dialog.make_character_dialog(
-            self.get_root(), None, None, self._save_character
+            self.get_root(), None, None, self._save_character,
+            config.server_address()
         )
 
     def _on_edit_clicked(self, name, data):
         crud_dialog.make_character_dialog(
             self.get_root(), name, data,
-            lambda v: self._save_character(v, old_name=name)
+            lambda v: self._save_character(v, old_name=name),
+            config.server_address()
         )
 
     def _save_character(self, values, old_name=None):
         """Persist a new or edited character to the server."""
         new_name = values['name']
+        img_bytes = values.get('_image_bytes')
+        remove_img = values.get('_remove_image', False)
         data = {
             'character': values.get('character', ''),
             'top': values.get('top', ''),
@@ -376,18 +434,30 @@ class CharactersPage(Gtk.ScrolledWindow):
             'categories': values.get('categories', '')
         }
         if old_name is None:
-            # Create: just add to the dict and POST
             chars = dict(self.all_characters)
             chars[new_name] = data
-            self._post_characters(chars)
+            self._post_characters(
+                chars,
+                on_done=lambda: self._handle_image(
+                    new_name, img_bytes, remove_img
+                )
+            )
         elif new_name != old_name:
-            # Rename: use dedicated endpoint so the image moves too
-            self._rename_character(old_name, new_name, data)
+            self._rename_character(
+                old_name, new_name, data,
+                on_done=lambda: self._handle_image(
+                    new_name, img_bytes, remove_img
+                )
+            )
         else:
-            # Update in-place
             chars = dict(self.all_characters)
             chars[old_name] = data
-            self._post_characters(chars)
+            self._post_characters(
+                chars,
+                on_done=lambda: self._handle_image(
+                    old_name, img_bytes, remove_img
+                )
+            )
 
     def _on_delete_clicked(self, name):
         crud_dialog.show_delete_confirm(

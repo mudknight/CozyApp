@@ -1,11 +1,15 @@
 #!/usr/bin/python3
 """CRUD dialogs for preset pages (Characters, Styles, Tags)."""
 import threading
+import base64
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('GtkSource', '5')
-from gi.repository import Gtk, Adw, GLib, Gdk, GtkSource  # noqa
+gi.require_version('GdkPixbuf', '2.0')
+from gi.repository import (  # noqa
+    Gtk, Adw, GLib, Gdk, GtkSource, GdkPixbuf, Gio
+)
 from tag_completion import TagCompletion  # noqa
 
 # ---------------------------------------------------------------------------
@@ -70,7 +74,6 @@ def make_source_view(height=70):
     view.completion_debounce_id = None
     view.completion_active = False
 
-    # Capture keys for completion navigation
     key_ctrl = Gtk.EventControllerKey()
     key_ctrl.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
     key_ctrl.connect(
@@ -132,6 +135,173 @@ def _do_completion(view, tc):
     else:
         tc.close_popup()
     return False
+
+
+# ---------------------------------------------------------------------------
+# Image picker widget
+# ---------------------------------------------------------------------------
+
+IMAGE_SIZE = 160   # Preview square size in pixels
+
+
+class ImagePicker(Gtk.Box):
+    """
+    A square image preview with Choose / Remove buttons.
+
+    State is stored in `self.pending_bytes` (raw file bytes of the
+    newly chosen image) and `self.remove_requested` (bool).
+    Pass neither / one of these to the save handler; the page decides
+    what API calls to make.
+    """
+
+    def __init__(self, image_url=None):
+        """
+        image_url: if given, fetch and display the existing image
+        on construction (background thread).
+        """
+        super().__init__(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+            halign=Gtk.Align.CENTER
+        )
+
+        self.pending_bytes = None     # bytes of new image to upload
+        self.remove_requested = False # True if user clicked Remove
+
+        # --- image area ---
+        frame = Gtk.Frame(css_classes=['card'])
+        frame.set_size_request(IMAGE_SIZE, IMAGE_SIZE)
+        self.append(frame)
+
+        overlay = Gtk.Overlay()
+        frame.set_child(overlay)
+
+        self._picture = Gtk.Picture(
+            content_fit=Gtk.ContentFit.COVER,
+            can_shrink=True
+        )
+        self._picture.set_size_request(IMAGE_SIZE, IMAGE_SIZE)
+        overlay.set_child(self._picture)
+
+        # Placeholder icon (shown when no image)
+        self._placeholder = Gtk.Image(
+            icon_name='image-x-generic-symbolic',
+            pixel_size=48,
+            opacity=0.3,
+            halign=Gtk.Align.CENTER,
+            valign=Gtk.Align.CENTER
+        )
+        overlay.add_overlay(self._placeholder)
+
+        # --- buttons ---
+        btn_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=6,
+            halign=Gtk.Align.CENTER
+        )
+        self.append(btn_row)
+
+        self._choose_btn = Gtk.Button(label="Choose Image")
+        self._choose_btn.connect("clicked", self._on_choose)
+        btn_row.append(self._choose_btn)
+
+        self._remove_btn = Gtk.Button(label="Remove")
+        self._remove_btn.add_css_class("destructive-action")
+        self._remove_btn.connect("clicked", self._on_remove)
+        self._remove_btn.set_visible(False)
+        btn_row.append(self._remove_btn)
+
+        # Fetch existing image if a URL was supplied
+        if image_url:
+            threading.Thread(
+                target=self._fetch_image, args=(image_url,), daemon=True
+            ).start()
+
+    def _fetch_image(self, url):
+        """Download and display the current image (background thread)."""
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=5) as r:
+                if r.status == 200:
+                    data = r.read()
+                    GLib.idle_add(self._set_image_bytes, data, False)
+        except Exception:
+            pass
+
+    def _set_image_bytes(self, raw_bytes, mark_pending):
+        """Load raw_bytes into the picture widget (main thread)."""
+        try:
+            loader = GdkPixbuf.PixbufLoader.new()
+            loader.write(raw_bytes)
+            loader.close()
+            pixbuf = loader.get_pixbuf()
+            if not pixbuf:
+                return
+            w = pixbuf.get_width()
+            h = pixbuf.get_height()
+            gbytes = GLib.Bytes.new(pixbuf.get_pixels())
+            fmt = (
+                Gdk.MemoryFormat.R8G8B8A8
+                if pixbuf.get_has_alpha()
+                else Gdk.MemoryFormat.R8G8B8
+            )
+            texture = Gdk.MemoryTexture.new(
+                w, h, fmt, gbytes, pixbuf.get_rowstride()
+            )
+            self._picture.set_paintable(texture)
+            self._placeholder.set_visible(False)
+            self._remove_btn.set_visible(True)
+            if mark_pending:
+                self.pending_bytes = raw_bytes
+                self.remove_requested = False
+        except Exception as e:
+            print(f"[ImagePicker] render error: {e}")
+
+    def _on_choose(self, _btn):
+        """Open a native file chooser and load the chosen image."""
+        chooser = Gtk.FileChooserNative(
+            title="Choose Image",
+            action=Gtk.FileChooserAction.OPEN,
+            accept_label="Open",
+            cancel_label="Cancel"
+        )
+        # Limit to common image types
+        f = Gtk.FileFilter()
+        f.set_name("Images")
+        for pat in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif"):
+            f.add_pattern(pat)
+        chooser.add_filter(f)
+
+        # Attach to the nearest Window ancestor
+        parent = self.get_root()
+        if isinstance(parent, Gtk.Window):
+            chooser.set_transient_for(parent)
+
+        chooser.connect("response", self._on_file_response)
+        chooser.show()
+        # Keep a reference so it isn't GC'd before the response
+        self._chooser = chooser
+
+    def _on_file_response(self, chooser, response):
+        if response == Gtk.ResponseType.ACCEPT:
+            f = chooser.get_file()
+            if f:
+                path = f.get_path()
+                try:
+                    with open(path, "rb") as fh:
+                        raw = fh.read()
+                    GLib.idle_add(self._set_image_bytes, raw, True)
+                except Exception as e:
+                    print(f"[ImagePicker] file read error: {e}")
+        self._chooser = None
+
+    def _on_remove(self, _btn):
+        """Clear the preview and mark for deletion on save."""
+        self._picture.set_paintable(None)
+        self._placeholder.set_visible(True)
+        self._remove_btn.set_visible(False)
+        self.pending_bytes = None
+        self.remove_requested = True
 
 
 # ---------------------------------------------------------------------------
@@ -202,22 +372,38 @@ def _buf_text(buf):
     return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
 
 
+def _encoded_name(name):
+    """Base64-encode a name for use in API image URLs."""
+    return base64.b64encode(name.encode('utf-8')).decode('ascii')
+
+
 # ---------------------------------------------------------------------------
 # Public dialog factories
 # ---------------------------------------------------------------------------
 
-def make_character_dialog(parent, name, data, on_save):
+def make_character_dialog(parent, name, data, on_save, server_address):
     """
     Show a character edit/create dialog.
 
-    data keys: character, top, bottom, neg, categories
-    on_save receives a dict with keys: name, character, top, bottom,
-    neg, categories
+    on_save receives a dict:
+      name, character, top, bottom, neg, categories,
+      _image_bytes (bytes | None), _remove_image (bool)
     """
     title = "Add Character" if name is None else f'Edit "{name}"'
     dialog, content, save_btn = _make_base_dialog(parent, title)
 
-    # Name + categories in a preferences group
+    # Image picker (top of dialog)
+    image_url = None
+    if name:
+        import config
+        image_url = (
+            f"http://{config.server_address()}"
+            f"/character_editor/image/{_encoded_name(name)}"
+        )
+    img_picker = ImagePicker(image_url=image_url)
+    content.append(img_picker)
+
+    # Name + categories
     id_group = Adw.PreferencesGroup()
     content.append(id_group)
 
@@ -230,7 +416,7 @@ def make_character_dialog(parent, name, data, on_save):
     )
     id_group.add(cat_row)
 
-    # Tag prompt fields — each uses a GtkSource.View
+    # Tag prompt fields
     char_box, char_buf = _labeled_source(
         "Character",
         data.get('character', '') if data else ''
@@ -266,21 +452,36 @@ def make_character_dialog(parent, name, data, on_save):
             'top': _buf_text(top_buf),
             'bottom': _buf_text(bot_buf),
             'neg': _buf_text(neg_buf),
-            'categories': cat_row.get_text()
+            'categories': cat_row.get_text(),
+            '_image_bytes': img_picker.pending_bytes,
+            '_remove_image': img_picker.remove_requested
         })
 
     save_btn.connect("clicked", _on_save)
     dialog.present(parent)
 
 
-def make_style_dialog(parent, name, data, on_save):
+def make_style_dialog(parent, name, data, on_save, server_address):
     """
     Show a style edit/create dialog.
 
-    on_save receives: {name, positive, negative}
+    on_save receives:
+      name, positive, negative,
+      _image_bytes (bytes | None), _remove_image (bool)
     """
     title = "Add Style" if name is None else f'Edit "{name}"'
     dialog, content, save_btn = _make_base_dialog(parent, title)
+
+    # Image picker (top of dialog)
+    image_url = None
+    if name:
+        import config
+        image_url = (
+            f"http://{config.server_address()}"
+            f"/style_editor/image/{_encoded_name(name)}"
+        )
+    img_picker = ImagePicker(image_url=image_url)
+    content.append(img_picker)
 
     id_group = Adw.PreferencesGroup()
     content.append(id_group)
@@ -307,7 +508,9 @@ def make_style_dialog(parent, name, data, on_save):
         on_save({
             'name': new_name,
             'positive': _buf_text(pos_buf),
-            'negative': _buf_text(neg_buf)
+            'negative': _buf_text(neg_buf),
+            '_image_bytes': img_picker.pending_bytes,
+            '_remove_image': img_picker.remove_requested
         })
 
     save_btn.connect("clicked", _on_save)

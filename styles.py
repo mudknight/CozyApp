@@ -250,18 +250,70 @@ class StylesPage(Gtk.ScrolledWindow):
     # API helpers                                                          #
     # ------------------------------------------------------------------ #
 
-    def _post_styles(self, styles):
+    def _post_styles(self, styles, on_done=None):
         """POST the full styles dict back to the server."""
         def worker():
             try:
                 url = f"http://{config.server_address()}/style_editor"
                 resp = requests.post(url, json=styles, timeout=5)
                 if resp.status_code == 200:
+                    if on_done:
+                        on_done()
                     GLib.idle_add(self.fetch_styles)
                 else:
                     self.log(f"Save failed: {resp.status_code}")
             except Exception as e:
                 self.log(f"Error saving styles: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_image(self, name, img_bytes, remove_img):
+        """Upload or delete a style image based on dialog state."""
+        if img_bytes:
+            self._upload_image(name, img_bytes)
+        elif remove_img:
+            self._delete_image_api(name)
+
+    def _upload_image(self, name, raw_bytes):
+        """POST raw image bytes to the style image endpoint."""
+        def worker():
+            try:
+                encoded_name = base64.b64encode(
+                    name.encode('utf-8')
+                ).decode('ascii')
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/style_editor/image/{encoded_name}"
+                )
+                payload = {
+                    'image': base64.b64encode(raw_bytes).decode('ascii')
+                }
+                resp = requests.post(url, json=payload, timeout=15)
+                if resp.status_code == 200:
+                    GLib.idle_add(self.fetch_styles)
+                else:
+                    self.log(
+                        f"Image upload failed: {resp.status_code}"
+                    )
+            except Exception as e:
+                self.log(f"Error uploading image: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _delete_image_api(self, name):
+        """DELETE the image for a style."""
+        def worker():
+            try:
+                encoded_name = base64.b64encode(
+                    name.encode('utf-8')
+                ).decode('ascii')
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/style_editor/image/{encoded_name}"
+                )
+                requests.delete(url, timeout=5)
+            except Exception as e:
+                self.log(f"Error deleting image: {e}")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -271,18 +323,22 @@ class StylesPage(Gtk.ScrolledWindow):
 
     def _on_add_clicked(self, _btn):
         crud_dialog.make_style_dialog(
-            self.get_root(), None, None, self._save_style
+            self.get_root(), None, None, self._save_style,
+            config.server_address()
         )
 
     def _on_edit_clicked(self, name, data):
         crud_dialog.make_style_dialog(
             self.get_root(), name, data,
-            lambda v: self._save_style(v, old_name=name)
+            lambda v: self._save_style(v, old_name=name),
+            config.server_address()
         )
 
     def _save_style(self, values, old_name=None):
         """Persist a new or edited style to the server."""
         new_name = values['name']
+        img_bytes = values.get('_image_bytes')
+        remove_img = values.get('_remove_image', False)
         data = {
             'positive': values.get('positive', ''),
             'negative': values.get('negative', '')
@@ -291,7 +347,12 @@ class StylesPage(Gtk.ScrolledWindow):
         if old_name and old_name != new_name:
             del styles[old_name]
         styles[new_name] = data
-        self._post_styles(styles)
+        self._post_styles(
+            styles,
+            on_done=lambda: self._handle_image(
+                new_name, img_bytes, remove_img
+            )
+        )
 
     def _on_delete_clicked(self, name):
         crud_dialog.show_delete_confirm(
