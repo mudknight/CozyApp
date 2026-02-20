@@ -91,8 +91,39 @@ class GalleryPage(Gtk.ScrolledWindow):
         return self._overlay
 
     def add_image(self, cache_path: Path, image_info: dict = None):
-        """Add a cached image to the gallery by path (thread-safe)."""
-        GLib.idle_add(self._add_image_idle, cache_path, image_info)
+        """
+        Add a cached image to the gallery by path (thread-safe).
+
+        Can be called from any thread. Heavy work (decode, scale) is
+        done on the calling thread; only widget creation hits the main
+        loop.
+        """
+        # Do expensive work on the calling (background) thread
+        try:
+            data = cache_path.read_bytes()
+        except Exception as e:
+            print(f"Gallery: failed to read cache file: {e}", flush=True)
+            return
+
+        pixbuf = self._pixbuf_from_bytes(data)
+        if pixbuf is None:
+            return
+
+        thumb = self._scale_pixbuf(pixbuf, THUMBNAIL_SIZE)
+        # Extract raw pixels so we can hand off to the main thread
+        # without keeping a live pixbuf reference across threads.
+        w = thumb.get_width()
+        h = thumb.get_height()
+        rowstride = thumb.get_rowstride()
+        has_alpha = thumb.get_has_alpha()
+        pixels = bytes(thumb.get_pixels())
+
+        # Schedule only widget creation on the main thread
+        GLib.idle_add(
+            self._add_image_idle,
+            cache_path, image_info,
+            w, h, rowstride, has_alpha, pixels
+        )
 
     def delete_by_cache_path(self, cache_path: Path):
         """
@@ -110,25 +141,20 @@ class GalleryPage(Gtk.ScrolledWindow):
     # Adding thumbnails
     # ------------------------------------------------------------------
 
-    def _add_image_idle(self, cache_path: Path, image_info: dict):
-        """Create thumbnail, prepend to grid (runs on main thread)."""
-        # Load bytes transiently just to build the thumbnail
-        try:
-            data = cache_path.read_bytes()
-        except Exception as e:
-            print(f"Gallery: failed to read cache file: {e}", flush=True)
-            return False
-
-        pixbuf = self._pixbuf_from_bytes(data)
-        if pixbuf is None:
-            return False
-
+    def _add_image_idle(
+        self, cache_path, image_info,
+        w, h, rowstride, has_alpha, pixels
+    ):
+        """Create thumbnail widget and prepend to grid (main thread)."""
         self._placeholder.set_visible(False)
 
-        thumb = self._scale_pixbuf(pixbuf, THUMBNAIL_SIZE)
-        texture = self._texture_from_pixbuf(thumb)
-        # Full-res pixbuf no longer kept in RAM
-        del pixbuf
+        # Rebuild texture from raw pixels — no decode on main thread
+        gbytes = GLib.Bytes.new(pixels)
+        fmt = (
+            Gdk.MemoryFormat.R8G8B8A8
+            if has_alpha else Gdk.MemoryFormat.R8G8B8
+        )
+        texture = Gdk.MemoryTexture.new(w, h, fmt, gbytes, rowstride)
 
         picture = Gtk.Picture(
             paintable=texture,

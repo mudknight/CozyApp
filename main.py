@@ -222,10 +222,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         # Purge cached images older than the configured threshold
         image_cache.cleanup_old(config.get("cache_max_age_days"))
 
-        # Populate gallery from disk cache in a background thread
-        threading.Thread(
-            target=self._load_cached_images, daemon=True
-        ).start()
+        # Defer gallery loading until the window is visible so the UI
+        # isn't blocked by idle callbacks before first render.
+        self.connect('map', self._on_window_mapped)
 
         if self.workflow_file:
             self.generate_page.load_workflow(self.workflow_file)
@@ -685,6 +684,12 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.preview_toggle.set_sensitive(False)
             self._set_preview_visible(False)
             self.preview_stack.set_visible_child_name('placeholder')
+
+    def _on_window_mapped(self, widget):
+        """Start gallery loading after the window is first shown."""
+        threading.Thread(
+            target=self._load_cached_images, daemon=True
+        ).start()
 
     def _load_cached_images(self):
         """
