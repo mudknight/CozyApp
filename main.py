@@ -626,6 +626,13 @@ class ComfyWindow(Adw.ApplicationWindow):
             .job-processing {
                 background-color: alpha(@accent_bg_color, 0.1);
             }
+            .completion-popup > contents { padding: 0; }
+            .completion-popup list {
+                background-color: mix(@window_bg_color, white, 0.08);
+            }
+            .completion-popup .item {
+                padding: 8px 12px;
+            }
         """
         css_provider.load_from_data(css_content, len(css_content))
         Gtk.StyleContext.add_provider_for_display(

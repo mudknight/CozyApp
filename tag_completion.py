@@ -433,6 +433,7 @@ class TagCompletion:
         self.current_textview = textview
 
         popover = Gtk.Popover()
+        popover.add_css_class('completion-popup')
         popover.set_parent(textview)
         popover.set_position(Gtk.PositionType.BOTTOM)
         popover.set_autohide(False)
@@ -481,11 +482,7 @@ class TagCompletion:
 
             # Create horizontal box for tag display
             hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                           spacing=8)
-            hbox.set_margin_start(8)
-            hbox.set_margin_end(8)
-            hbox.set_margin_top(4)
-            hbox.set_margin_bottom(4)
+                           spacing=10, css_classes=['item'])
 
             # Tag label
             tag_label = Gtk.Label(label=tag, xalign=0)
