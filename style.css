@@ -1,0 +1,82 @@
+.gallery-thumb { border-radius: 8px; }
+flowboxchild:selected .gallery-thumb {
+    outline: 2px solid @accent_color;
+    box-shadow: 0 0 0 3px alpha(@accent_color, 0.35);
+    border-radius: 8px;
+}
+revealer { background-color: transparent; border: none; }
+.preview-panel {
+    background-color: @card_bg_color;
+    border-left: none;
+}
+textview.view {
+    border: none;
+    background-color: @view_bg_color;
+}
+scrolledwindow.prompt-scroll {
+    border-radius: 8px;
+}
+scrolledwindow.prompt-focused {
+    outline: 2px solid @accent_bg_color;
+    border-radius: 8px;
+}
+.quick-settings-card {
+    background-color: @card_bg_color;
+    border-radius: 12px;
+    border: 1px solid alpha(currentColor, 0.07);
+}
+.quick-settings-card:hover {
+    background-color: @card_bg_color;
+}
+gutter {
+    background-color: alpha(@view_fg_color, 0.05);
+    border-right: 1px solid alpha(@view_fg_color, 0.1);
+}
+.magnifier-frame {
+    border: 2px solid alpha(currentColor, 0.3);
+    border-radius: 8px;
+    background-color: @window_bg_color;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.queue-badge {
+    border-radius: 9px;
+    background-color: alpha(@view_fg_color, 0.1);
+    color: alpha(@view_fg_color, 0.5);
+    opacity: 0.7;
+    min-width: 60px;
+}
+.queue-active {
+    background-color: alpha(@accent_bg_color, 0.3);
+    border-color: @accent_bg_color;
+    color: alpha(@accent_fg_color, 0.7);
+    opacity: 1.0;
+}
+.current-node-label {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background-color: alpha(@accent_bg_color, 0.2);
+    border: 1px solid alpha(@accent_bg_color, 0.4);
+    color: @accent_fg_color;
+    font-size: 10px;
+    font-family: monospace;
+}
+.about-image { border-radius: 16px; }
+.queue-group > button {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.queue-group > spinbutton {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-left-width: 0;
+}
+.job-processing {
+    background-color: alpha(@accent_bg_color, 0.1);
+}
+.completion-popup > contents { padding: 0; }
+.completion-popup list {
+    background-color: mix(@window_bg_color, white, 0.08);
+}
+.completion-popup .item {
+    padding: 8px 12px;
+}
