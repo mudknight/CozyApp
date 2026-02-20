@@ -707,6 +707,9 @@ class ComfyWindow(Adw.ApplicationWindow):
         if name in ('generate', 'gallery'):
             self.preview_toggle.set_sensitive(True)
             self._set_preview_visible(self._preview_user_preference)
+            if name == 'gallery':
+                # Defer scroll so the widget is fully laid out first
+                GLib.idle_add(self.gallery.scroll_to_top)
             if name == 'generate':
                 if self.gen_pixbuf:
                     self._show_pixbuf_in_preview(self.gen_pixbuf)

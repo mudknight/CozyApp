@@ -2,7 +2,6 @@
 """Gallery page: thumbnail grid with multi-select and context menus."""
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import gi
 
@@ -40,9 +39,6 @@ class GalleryPage(Gtk.ScrolledWindow):
         self._last_activated_child = None
         # Active context popover (kept to dismiss on re-open)
         self._active_popover = None
-
-        # Scroll to top whenever the gallery tab is shown
-        self.connect('map', lambda _: self.get_vadjustment().set_value(0))
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         for side in ['top', 'bottom', 'start', 'end']:
@@ -94,6 +90,10 @@ class GalleryPage(Gtk.ScrolledWindow):
         if selected:
             self._flow.set_focus_child(selected[0])
 
+    def scroll_to_top(self):
+        """Reset scroll position to the top of the grid."""
+        self.get_vadjustment().set_value(0)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -143,8 +143,11 @@ class GalleryPage(Gtk.ScrolledWindow):
         Add multiple cached images efficiently (thread-safe).
 
         images: list of (cache_path, image_info) tuples, oldest-first.
-        Decodes all thumbnails in parallel then adds them in
-        _LOAD_BATCH_SIZE chunks to avoid blocking the main loop.
+        Decodes thumbnails sequentially in a background thread and
+        schedules widget creation in _LOAD_BATCH_SIZE chunks so the
+        main loop stays responsive and first images appear quickly.
+        GdkPixbuf is not thread-safe for concurrent use, so all
+        decoding stays on a single background thread.
         """
         if not images:
             return
@@ -153,9 +156,9 @@ class GalleryPage(Gtk.ScrolledWindow):
         ).start()
 
     def _decode_batch(self, images: list):
-        """Background: decode all thumbnails in parallel, then schedule."""
-        def decode_one(args):
-            idx, (cache_path, image_info) = args
+        """Background: decode thumbnails sequentially, schedule in chunks."""
+        chunk = []
+        for cache_path, image_info in images:
             try:
                 data = cache_path.read_bytes()
             except Exception as e:
@@ -163,38 +166,30 @@ class GalleryPage(Gtk.ScrolledWindow):
                     f"Gallery: read error {cache_path.name}: {e}",
                     flush=True
                 )
-                return None
+                continue
             pixbuf = self._pixbuf_from_bytes(data)
             if pixbuf is None:
-                return None
+                continue
             thumb = self._scale_pixbuf(pixbuf, THUMBNAIL_SIZE)
-            return (
-                idx, cache_path, image_info,
+            chunk.append((
+                cache_path, image_info,
                 thumb.get_width(), thumb.get_height(),
                 thumb.get_rowstride(), thumb.get_has_alpha(),
                 bytes(thumb.get_pixels())
-            )
-
-        workers = os.cpu_count() or 4
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            raw = list(pool.map(decode_one, enumerate(images)))
-
-        # Discard failures and restore original (oldest-first) order
-        results = sorted(
-            (r for r in raw if r is not None),
-            key=lambda r: r[0]
-        )
-
-        # Schedule widget creation in chunks
-        for i in range(0, len(results), _LOAD_BATCH_SIZE):
-            chunk = results[i:i + _LOAD_BATCH_SIZE]
+            ))
+            # Schedule each full chunk immediately so thumbnails
+            # appear progressively rather than all at once at the end.
+            if len(chunk) >= _LOAD_BATCH_SIZE:
+                GLib.idle_add(self._add_chunk_idle, chunk)
+                chunk = []
+        if chunk:
             GLib.idle_add(self._add_chunk_idle, chunk)
 
     def _add_chunk_idle(self, chunk: list):
         """Main thread: create thumbnail widgets for one chunk."""
         self._placeholder.set_visible(False)
         for entry in chunk:
-            _, cache_path, image_info, w, h, rs, alpha, px = entry
+            cache_path, image_info, w, h, rs, alpha, px = entry
             self._add_image_idle(
                 cache_path, image_info, w, h, rs, alpha, px
             )
