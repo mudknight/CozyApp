@@ -1,14 +1,14 @@
 #!/usr/bin/python3
-"""Characters page: grid of character cards fetched from the server."""
+"""Characters page: grid of character cards with full CRUD support."""
+import threading
+import base64
 import requests
 import gi
-import urllib.parse
-import base64
 import config
+import crud_dialog
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-
 gi.require_version('GdkPixbuf', '2.0')
 
 from gi.repository import Gtk, Adw, GLib, Gdk, Pango, GdkPixbuf  # noqa
@@ -17,47 +17,47 @@ THUMBNAIL_SIZE = 220
 
 
 class CharacterCard(Gtk.Frame):
-    """A card representing a character."""
+    """A card representing a character with right-click CRUD menu."""
 
-    def __init__(self, name, data, on_click=None):
+    def __init__(self, name, data, on_click=None,
+                 on_edit=None, on_delete=None):
         super().__init__(css_classes=['card'])
         self.name = name
         self.data = data
         self.on_click = on_click
+        self.on_edit = on_edit
+        self.on_delete = on_delete
 
-        # Ensure the card itself has a fixed square size
         self.set_size_request(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
 
-        # Overlay allows us to stack text on top of the image
         overlay = Gtk.Overlay()
         self.set_child(overlay)
 
-        # Image area
         self.picture = Gtk.Picture(
             content_fit=Gtk.ContentFit.COVER,
             can_shrink=True
         )
         self.picture.set_size_request(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
-        # Placeholder/Base styling
         overlay.set_child(self.picture)
 
-        # Info overlay (bottom-aligned)
-        info_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        # Name / category overlay at the bottom of the card
+        info_vbox = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=2
+        )
         info_vbox.set_valign(Gtk.Align.END)
         info_vbox.add_css_class('character-card-info')
 
-        # Name label
         name_label = Gtk.Label(label=name.title())
         name_label.add_css_class('character-card-name')
         name_label.set_halign(Gtk.Align.START)
         name_label.set_ellipsize(Pango.EllipsizeMode.END)
         info_vbox.append(name_label)
 
-        # Category tag (if any)
         categories = data.get('categories', '').strip()
         if categories:
             cat_box = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=4
+            )
             for cat in categories.split(','):
                 cat = cat.strip()
                 if not cat:
@@ -70,72 +70,73 @@ class CharacterCard(Gtk.Frame):
 
         overlay.add_overlay(info_vbox)
 
-        # Click handling
-        gesture = Gtk.GestureClick()
-        gesture.connect('released', self._on_released)
-        self.add_controller(gesture)
+        # Left click — select character
+        left_gesture = Gtk.GestureClick(button=1)
+        left_gesture.connect('released', self._on_left_click)
+        self.add_controller(left_gesture)
 
-        # Start loading image
+        # Right click — context menu
+        right_gesture = Gtk.GestureClick(button=3)
+        right_gesture.connect('released', self._on_right_click)
+        self.add_controller(right_gesture)
+
         GLib.idle_add(self._load_image)
 
     def _load_image(self):
-        """Fetch image in a background thread."""
+        """Fetch the character image in a background thread."""
         def worker():
             try:
-                # Replicate JS: btoa(unescape(encodeURIComponent(name)))
-                # For UTF-8, this is equivalent to base64 encoding the UTF-8 bytes
-                encoded_name = base64.b64encode(
-                    self.name.encode('utf-8')).decode('ascii')
+                encoded = base64.b64encode(
+                    self.name.encode('utf-8')
+                ).decode('ascii')
                 url = (
                     f"http://{config.server_address()}"
-                    f"/character_editor/image/{encoded_name}"
+                    f"/character_editor/image/{encoded}"
                 )
-                # print(f"[DEBUG] Fetching image for {self.name}: {url}")
                 resp = requests.get(url, timeout=10)
-                # print(f"[DEBUG] Response for {self.name}: {resp.status_code}, content-type: {resp.headers.get('content-type')}")
                 if resp.status_code == 200:
-                    data = resp.content
-                    # print(f"[DEBUG] Received {len(data)} bytes for {self.name}")
                     loader = GdkPixbuf.PixbufLoader.new()
-                    loader.write(data)
+                    loader.write(resp.content)
                     loader.close()
                     pixbuf = loader.get_pixbuf()
-
                     if pixbuf:
-                        # print(f"[DEBUG] Successfully loaded pixbuf for {self.name} ({pixbuf.get_width()}x{pixbuf.get_height()})")
                         GLib.idle_add(self._update_image, pixbuf)
-                else:
-                    print(
-                        f"[DEBUG] Failed to load image for {self.name}: HTTP {resp.status_code}")
             except Exception as e:
-                print(f"[DEBUG] Error loading image for {self.name}: {e}")
+                print(
+                    f"[characters] image load error for {self.name}: {e}"
+                )
 
-        import threading
         threading.Thread(target=worker, daemon=True).start()
 
     def _update_image(self, pixbuf):
-        """Update the picture widget with the fetched pixbuf."""
-        # Scale to thumbnail size
-        w, h = pixbuf.get_width(), pixbuf.get_height()
-        scale = max(THUMBNAIL_SIZE / w, THUMBNAIL_SIZE / h)
-
-        # Convert to texture
+        """Render the fetched pixbuf into the picture widget."""
+        w = pixbuf.get_width()
+        h = pixbuf.get_height()
         rowstride = pixbuf.get_rowstride()
         has_alpha = pixbuf.get_has_alpha()
-        pixels = pixbuf.get_pixels()
-        gbytes = GLib.Bytes.new(pixels)
-        fmt = Gdk.MemoryFormat.R8G8B8A8 if has_alpha else Gdk.MemoryFormat.R8G8B8
-
+        gbytes = GLib.Bytes.new(pixbuf.get_pixels())
+        fmt = (
+            Gdk.MemoryFormat.R8G8B8A8
+            if has_alpha
+            else Gdk.MemoryFormat.R8G8B8
+        )
         texture = Gdk.MemoryTexture.new(w, h, fmt, gbytes, rowstride)
         self.picture.set_paintable(texture)
 
-    def _on_released(self, gesture, n_press, x, y):
+    def _on_left_click(self, gesture, n_press, x, y):
         if self.on_click:
             self.on_click(self.name, self.data)
 
+    def _on_right_click(self, gesture, n_press, x, y):
+        crud_dialog.show_card_context_menu(
+            self, x, y,
+            on_edit=lambda: self.on_edit(self.name, self.data),
+            on_delete=lambda: self.on_delete(self.name)
+        )
+
 
 class CharactersPage(Gtk.ScrolledWindow):
-    """Scrollable grid of character cards."""
+    """Scrollable grid of character cards with CRUD toolbar."""
 
     def __init__(self, on_character_selected=None, log_fn=None):
         super().__init__(
@@ -146,17 +147,33 @@ class CharactersPage(Gtk.ScrolledWindow):
         )
         self.on_character_selected = on_character_selected
         self.log_fn = log_fn
+        self.all_characters = {}
 
         self.outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         for side in ['top', 'bottom', 'start', 'end']:
             getattr(self.outer, f'set_margin_{side}')(20)
 
-        # Search entry
+        # Search bar row with Add button
+        search_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            margin_bottom=20
+        )
         self.search_entry = Gtk.SearchEntry(
-            placeholder_text="Search characters...")
-        self.search_entry.set_margin_bottom(20)
-        self.search_entry.connect('search-changed', self._on_search_changed)
-        self.outer.append(self.search_entry)
+            placeholder_text="Search characters...",
+            hexpand=True
+        )
+        self.search_entry.connect(
+            'search-changed', self._on_search_changed
+        )
+        search_row.append(self.search_entry)
+
+        add_btn = Gtk.Button(icon_name='list-add-symbolic')
+        add_btn.set_tooltip_text("Add character")
+        add_btn.connect('clicked', self._on_add_clicked)
+        search_row.append(add_btn)
+
+        self.outer.append(search_row)
 
         self.flow = Gtk.FlowBox(
             max_children_per_line=10,
@@ -170,17 +187,12 @@ class CharactersPage(Gtk.ScrolledWindow):
         self.outer.append(self.flow)
         self.set_child(self.outer)
 
-        self.all_characters = {}
-
-        # Add CSS for pills and cards
         self._setup_css()
-
-        # Initial fetch
         GLib.idle_add(self.fetch_characters)
 
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
-        css_content = """
+        css = """
             .pill {
                 background-color: alpha(@accent_bg_color, 0.2);
                 color: @accent_fg_color;
@@ -198,7 +210,12 @@ class CharactersPage(Gtk.ScrolledWindow):
                 border-color: alpha(@accent_bg_color, 0.3);
             }
             .character-card-info {
-                background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 70%, transparent 100%);
+                background: linear-gradient(
+                    to top,
+                    rgba(0,0,0,0.8) 0%,
+                    rgba(0,0,0,0.4) 70%,
+                    transparent 100%
+                );
                 padding: 8px;
                 color: white;
             }
@@ -208,7 +225,7 @@ class CharactersPage(Gtk.ScrolledWindow):
                 text-shadow: 0 1px 2px rgba(0,0,0,0.5);
             }
         """
-        css_provider.load_from_data(css_content, len(css_content))
+        css_provider.load_from_data(css, len(css))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             css_provider,
@@ -221,8 +238,12 @@ class CharactersPage(Gtk.ScrolledWindow):
         else:
             print(text, flush=True)
 
+    # ------------------------------------------------------------------ #
+    # Fetch / render                                                       #
+    # ------------------------------------------------------------------ #
+
     def fetch_characters(self):
-        """Fetch character data from the server."""
+        """Fetch character data from the server (background thread)."""
         def worker():
             try:
                 url = (
@@ -230,23 +251,28 @@ class CharactersPage(Gtk.ScrolledWindow):
                 )
                 resp = requests.get(url, timeout=5)
                 if resp.status_code == 200:
-                    data = resp.json()
-                    GLib.idle_add(self.update_grid, data)
+                    GLib.idle_add(self.update_grid, resp.json())
                 else:
-                    self.log(f"Failed to fetch characters: {resp.status_code}")
+                    self.log(
+                        f"Failed to fetch characters: "
+                        f"{resp.status_code}"
+                    )
             except Exception as e:
                 self.log(f"Error fetching characters: {e}")
 
-        import threading
         threading.Thread(target=worker, daemon=True).start()
 
     def update_grid(self, characters):
-        """Update the FlowBox with character cards."""
+        """Rebuild the FlowBox with fresh character cards."""
         self.all_characters = characters
         self._clear_grid()
-
         for name, data in characters.items():
-            card = CharacterCard(name, data, self.on_character_selected)
+            card = CharacterCard(
+                name, data,
+                on_click=self.on_character_selected,
+                on_edit=self._on_edit_clicked,
+                on_delete=self._on_delete_clicked
+            )
             self.flow.append(card)
 
     def _clear_grid(self):
@@ -256,18 +282,135 @@ class CharactersPage(Gtk.ScrolledWindow):
                 break
             self.flow.remove(child)
 
-    def _on_search_changed(self, entry):
-        search_text = entry.get_text().lower()
+    # ------------------------------------------------------------------ #
+    # API helpers                                                          #
+    # ------------------------------------------------------------------ #
 
-        # Iterate over FlowBoxChildren
+    def _post_characters(self, characters):
+        """POST the full characters dict back to the server."""
+        def worker():
+            try:
+                url = (
+                    f"http://{config.server_address()}"
+                    "/character_editor"
+                )
+                resp = requests.post(url, json=characters, timeout=5)
+                if resp.status_code == 200:
+                    GLib.idle_add(self.fetch_characters)
+                else:
+                    self.log(f"Save failed: {resp.status_code}")
+            except Exception as e:
+                self.log(f"Error saving characters: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _rename_character(self, old_name, new_name, data):
+        """Use the rename endpoint (also moves the image)."""
+        def worker():
+            try:
+                url = (
+                    f"http://{config.server_address()}"
+                    "/character_editor/rename"
+                )
+                payload = {
+                    'oldName': old_name,
+                    'newName': new_name,
+                    'data': data
+                }
+                resp = requests.post(url, json=payload, timeout=5)
+                if resp.status_code == 200:
+                    GLib.idle_add(self.fetch_characters)
+                else:
+                    self.log(
+                        f"Rename failed: {resp.status_code} {resp.text}"
+                    )
+            except Exception as e:
+                self.log(f"Error renaming character: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _delete_character_api(self, name):
+        """Call the DELETE endpoint for a single character."""
+        def worker():
+            try:
+                encoded = requests.utils.quote(name, safe='')
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/character_editor/{encoded}"
+                )
+                resp = requests.delete(url, timeout=5)
+                if resp.status_code == 200:
+                    GLib.idle_add(self.fetch_characters)
+                else:
+                    self.log(
+                        f"Delete failed: {resp.status_code} {resp.text}"
+                    )
+            except Exception as e:
+                self.log(f"Error deleting character: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ------------------------------------------------------------------ #
+    # UI event handlers                                                    #
+    # ------------------------------------------------------------------ #
+
+    def _on_add_clicked(self, _btn):
+        crud_dialog.make_character_dialog(
+            self.get_root(), None, None, self._save_character
+        )
+
+    def _on_edit_clicked(self, name, data):
+        crud_dialog.make_character_dialog(
+            self.get_root(), name, data,
+            lambda v: self._save_character(v, old_name=name)
+        )
+
+    def _save_character(self, values, old_name=None):
+        """Persist a new or edited character to the server."""
+        new_name = values['name']
+        data = {
+            'character': values.get('character', ''),
+            'top': values.get('top', ''),
+            'bottom': values.get('bottom', ''),
+            'neg': values.get('neg', ''),
+            'categories': values.get('categories', '')
+        }
+        if old_name is None:
+            # Create: just add to the dict and POST
+            chars = dict(self.all_characters)
+            chars[new_name] = data
+            self._post_characters(chars)
+        elif new_name != old_name:
+            # Rename: use dedicated endpoint so the image moves too
+            self._rename_character(old_name, new_name, data)
+        else:
+            # Update in-place
+            chars = dict(self.all_characters)
+            chars[old_name] = data
+            self._post_characters(chars)
+
+    def _on_delete_clicked(self, name):
+        crud_dialog.show_delete_confirm(
+            self.get_root(),
+            name,
+            lambda: self._delete_character_api(name)
+        )
+
+    def _on_search_changed(self, entry):
+        search = entry.get_text().lower()
         child = self.flow.get_first_child()
         while child:
-            # The card is the child of the FlowBoxChild
             card = child.get_child()
             if isinstance(card, CharacterCard):
-                visible = search_text in card.name.lower() or \
-                    search_text in card.data.get('character', '').lower() or \
-                    search_text in card.data.get('categories', '').lower()
+                visible = (
+                    search in card.name.lower()
+                    or search in card.data.get(
+                        'character', ''
+                    ).lower()
+                    or search in card.data.get(
+                        'categories', ''
+                    ).lower()
+                )
                 child.set_visible(visible)
             child = child.get_next_sibling()
 
