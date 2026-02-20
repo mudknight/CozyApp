@@ -158,7 +158,9 @@ class GalleryPage(Gtk.ScrolledWindow):
     def _decode_batch(self, images: list):
         """Background: decode thumbnails sequentially, schedule in chunks."""
         chunk = []
-        for cache_path, image_info in images:
+        # Iterate newest-first so the first chunk to hit the main loop
+        # contains the most recent images, which get appended in order.
+        for cache_path, image_info in reversed(images):
             try:
                 data = cache_path.read_bytes()
             except Exception as e:
@@ -191,7 +193,8 @@ class GalleryPage(Gtk.ScrolledWindow):
         for entry in chunk:
             cache_path, image_info, w, h, rs, alpha, px = entry
             self._add_image_idle(
-                cache_path, image_info, w, h, rs, alpha, px
+                cache_path, image_info, w, h, rs, alpha, px,
+                prepend=False
             )
         return False
 
@@ -220,9 +223,10 @@ class GalleryPage(Gtk.ScrolledWindow):
 
     def _add_image_idle(
         self, cache_path, image_info,
-        w, h, rowstride, has_alpha, pixels
+        w, h, rowstride, has_alpha, pixels,
+        prepend=True
     ):
-        """Create thumbnail widget and prepend to grid (main thread)."""
+        """Create thumbnail widget and insert into grid (main thread)."""
         self._placeholder.set_visible(False)
 
         # Rebuild texture from raw pixels — no decode on main thread
@@ -245,11 +249,17 @@ class GalleryPage(Gtk.ScrolledWindow):
         frame = Gtk.Frame(css_classes=['gallery-thumb'])
         frame.set_child(picture)
 
-        # Newest images go to the top-left
-        self._flow.prepend(frame)
+        if prepend:
+            # New generation images go to the top-left
+            self._flow.prepend(frame)
+            child = self._flow.get_child_at_index(0)
+        else:
+            # Batch-loaded images are appended in newest-first order
+            self._flow.append(frame)
+            child = self._flow.get_child_at_index(
+                self._flow_child_count() - 1
+            )
 
-        # Retrieve the FlowBoxChild that wraps our frame
-        child = self._flow.get_child_at_index(0)
         # Attach image metadata for deletion
         child._image_info = image_info
 
@@ -261,6 +271,13 @@ class GalleryPage(Gtk.ScrolledWindow):
         child.add_controller(gesture)
 
         return False
+
+    def _flow_child_count(self):
+        """Return the number of children currently in the flowbox."""
+        count = 0
+        while self._flow.get_child_at_index(count) is not None:
+            count += 1
+        return count
 
     # ------------------------------------------------------------------
     # Click / selection handling
