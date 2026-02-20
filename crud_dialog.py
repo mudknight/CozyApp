@@ -205,6 +205,11 @@ class ImagePicker(Gtk.Box):
         self._choose_btn.connect("clicked", self._on_choose)
         btn_row.append(self._choose_btn)
 
+        # Paste image directly from clipboard (e.g. copied from gallery)
+        self._paste_btn = Gtk.Button(label="Paste")
+        self._paste_btn.connect("clicked", self._on_paste)
+        btn_row.append(self._paste_btn)
+
         self._remove_btn = Gtk.Button(label="Remove")
         self._remove_btn.add_css_class("destructive-action")
         self._remove_btn.connect("clicked", self._on_remove)
@@ -256,6 +261,25 @@ class ImagePicker(Gtk.Box):
                 self.remove_requested = False
         except Exception as e:
             print(f"[ImagePicker] render error: {e}")
+
+    def _on_paste(self, _btn):
+        """Read an image from the system clipboard and load it."""
+        clipboard = Gdk.Display.get_default().get_clipboard()
+        clipboard.read_texture_async(
+            None, self._on_clipboard_texture
+        )
+
+    def _on_clipboard_texture(self, clipboard, result):
+        """Callback: convert clipboard texture to PNG bytes."""
+        try:
+            texture = clipboard.read_texture_finish(result)
+            if texture is None:
+                return
+            png_bytes = texture.save_to_png_bytes()
+            raw = bytes(png_bytes.get_data())
+            GLib.idle_add(self._set_image_bytes, raw, True)
+        except Exception as e:
+            print(f"[ImagePicker] clipboard paste error: {e}")
 
     def _on_choose(self, _btn):
         """Open a native file chooser and load the chosen image."""
