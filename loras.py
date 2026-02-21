@@ -703,6 +703,9 @@ class LorasPage:
         """Reset loading state and stop spinner."""
         self._loading = False
         self._spinner.stop()
+        if not error:
+            # If the content doesn't fill the viewport yet, keep loading
+            GLib.idle_add(self._load_until_full)
 
     def _clear_grid(self):
         """Remove all children from the flow box."""
@@ -711,6 +714,17 @@ class LorasPage:
             nxt = child.get_next_sibling()
             self._flow.remove(child)
             child = nxt
+
+    def _load_until_full(self):
+        """Fetch the next page if content doesn't fill the viewport."""
+        if self._loading:
+            return
+        if self._current_page >= self._total_pages:
+            return
+        adj = self._scroll_adj
+        # Content fits entirely on screen — no scrollbar yet
+        if adj.get_upper() <= adj.get_page_size():
+            self._fetch_page(self._current_page + 1)
 
     def _reload(self):
         """Clear and re-fetch from page 1."""
