@@ -238,6 +238,9 @@ class LorasPage:
         self._total_pages = 1
         self._loading = False
         self._search_text = ''
+        # Active sidebar filters
+        self._active_base_model = None
+        self._active_tag = None
 
         self._build_ui()
         GLib.idle_add(self._fetch_page, 1)
@@ -272,9 +275,6 @@ class LorasPage:
         toolbar.append(self._search)
 
         # Sort dropdown
-        self._sort_model = Gtk.StringList.new([
-            'name', 'date_modified', 'file_size'
-        ])
         self._sort_labels = {
             'name': 'Name',
             'date_modified': 'Modified',
@@ -311,6 +311,22 @@ class LorasPage:
         toolbar.append(refresh_btn)
 
         self._root.append(toolbar)
+
+        # Horizontal pane: sidebar | grid
+        content_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            hexpand=True,
+            vexpand=True
+        )
+        self._root.append(content_box)
+
+        # Sidebar
+        content_box.append(self._build_sidebar())
+
+        # Separator between sidebar and grid
+        content_box.append(Gtk.Separator(
+            orientation=Gtk.Orientation.VERTICAL
+        ))
 
         # Scrolled window containing the flow grid
         scroll = Gtk.ScrolledWindow(
@@ -361,12 +377,124 @@ class LorasPage:
             )
         )
         self._status.set_visible(False)
-        self._root.append(self._status)
+        content_box.append(self._status)
 
         scroll.set_child(inner)
-        self._root.append(scroll)
+        content_box.append(scroll)
         self._scroll_adj = vadj
         self._setup_css()
+
+    def _build_sidebar(self):
+        """Build the filter sidebar widget."""
+        sidebar_scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            vexpand=True
+        )
+        sidebar_scroll.set_size_request(160, -1)
+
+        sidebar = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+            margin_top=8,
+            margin_bottom=8
+        )
+
+        # "All" row to clear filters
+        self._all_row_box = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.SINGLE,
+            css_classes=['navigation-sidebar']
+        )
+        all_row = Gtk.ListBoxRow()
+        all_label = Gtk.Label(
+            label='All',
+            xalign=0,
+            margin_start=12,
+            margin_end=12,
+            margin_top=6,
+            margin_bottom=6
+        )
+        all_row.set_child(all_label)
+        self._all_row_box.append(all_row)
+        self._all_row_box.select_row(all_row)
+        self._all_row_box.connect(
+            'row-selected', self._on_all_selected
+        )
+        sidebar.append(self._all_row_box)
+
+        # Base model section
+        sidebar.append(Gtk.Label(
+            label='Base Model',
+            xalign=0,
+            css_classes=['caption', 'dim-label'],
+            margin_start=12,
+            margin_top=12,
+            margin_bottom=4
+        ))
+        self._base_model_list = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.SINGLE,
+            css_classes=['navigation-sidebar']
+        )
+        self._base_model_list.connect(
+            'row-selected', self._on_base_model_selected
+        )
+        sidebar.append(self._base_model_list)
+
+        # Tags section
+        sidebar.append(Gtk.Label(
+            label='Tags',
+            xalign=0,
+            css_classes=['caption', 'dim-label'],
+            margin_start=12,
+            margin_top=12,
+            margin_bottom=4
+        ))
+        self._tag_list = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.SINGLE,
+            css_classes=['navigation-sidebar']
+        )
+        self._tag_list.connect(
+            'row-selected', self._on_tag_selected
+        )
+        sidebar.append(self._tag_list)
+
+        sidebar_scroll.set_child(sidebar)
+
+        # Fetch sidebar data in the background
+        threading.Thread(
+            target=self._fetch_sidebar_data, daemon=True
+        ).start()
+
+        return sidebar_scroll
+
+    def _make_filter_row(self, label, count):
+        """Create a ListBoxRow with a label and count badge."""
+        row = Gtk.ListBoxRow()
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            margin_start=12,
+            margin_end=8,
+            margin_top=5,
+            margin_bottom=5,
+            spacing=4
+        )
+        lbl = Gtk.Label(
+            label=label,
+            xalign=0,
+            hexpand=True,
+            ellipsize=Pango.EllipsizeMode.END,
+            width_chars=1
+        )
+        box.append(lbl)
+        count_lbl = Gtk.Label(
+            label=str(count),
+            css_classes=['dim-label', 'caption']
+        )
+        box.append(count_lbl)
+        row.set_child(box)
+        # Store the filter value on the row for retrieval on selection
+        row._filter_value = label
+        return row
 
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
@@ -420,6 +548,44 @@ class LorasPage:
             daemon=True
         ).start()
 
+    def _fetch_sidebar_data(self):
+        """Fetch base models and tags to populate the sidebar."""
+        base = config.server_address()
+        try:
+            r = requests.get(
+                f"http://{base}/api/lm/loras/base-models", timeout=10
+            )
+            if r.status_code == 200:
+                items = r.json().get('base_models', [])
+                GLib.idle_add(self._populate_base_models, items)
+        except Exception as e:
+            self.log_fn(f"[loras] sidebar base-models error: {e}")
+        try:
+            r = requests.get(
+                f"http://{base}/api/lm/loras/top-tags", timeout=10
+            )
+            if r.status_code == 200:
+                items = r.json().get('tags', [])
+                GLib.idle_add(self._populate_tags, items)
+        except Exception as e:
+            self.log_fn(f"[loras] sidebar tags error: {e}")
+
+    def _populate_base_models(self, items):
+        """Add base model rows to the sidebar list."""
+        for item in items:
+            row = self._make_filter_row(
+                item['name'], item['count']
+            )
+            self._base_model_list.append(row)
+
+    def _populate_tags(self, items):
+        """Add tag rows to the sidebar list."""
+        for item in items:
+            row = self._make_filter_row(
+                item['tag'], item['count']
+            )
+            self._tag_list.append(row)
+
     def _fetch_worker(self, page, search, sort_by):
         """Worker thread: call the Lora Manager API and schedule update."""
         try:
@@ -430,6 +596,10 @@ class LorasPage:
             }
             if search:
                 params['search'] = search
+            if self._active_base_model:
+                params['base_model'] = self._active_base_model
+            if self._active_tag:
+                params['tags'] = self._active_tag
             url = (
                 f"http://{config.server_address()}"
                 f"/api/lm/loras/list"
@@ -508,7 +678,7 @@ class LorasPage:
             self._fetch_page(self._current_page + 1)
 
     # ------------------------------------------------------------------
-    # Search / sort
+    # Search / sort / sidebar
     # ------------------------------------------------------------------
 
     def _on_search_changed(self, entry):
@@ -516,6 +686,59 @@ class LorasPage:
         self._reload()
 
     def _on_sort_changed(self, dropdown, _param):
+        self._reload()
+
+    def _on_all_selected(self, listbox, row):
+        """Clear all filters when the All row is selected."""
+        if row is None:
+            return
+        self._active_base_model = None
+        self._active_tag = None
+        # Deselect the other lists without triggering their handlers
+        self._base_model_list.handler_block_by_func(
+            self._on_base_model_selected
+        )
+        self._tag_list.handler_block_by_func(self._on_tag_selected)
+        self._base_model_list.unselect_all()
+        self._tag_list.unselect_all()
+        self._base_model_list.handler_unblock_by_func(
+            self._on_base_model_selected
+        )
+        self._tag_list.handler_unblock_by_func(self._on_tag_selected)
+        self._reload()
+
+    def _on_base_model_selected(self, listbox, row):
+        """Filter by base model when a row is selected."""
+        if row is None:
+            return
+        self._active_base_model = row._filter_value
+        self._active_tag = None
+        # Deselect sibling lists
+        self._all_row_box.handler_block_by_func(self._on_all_selected)
+        self._tag_list.handler_block_by_func(self._on_tag_selected)
+        self._all_row_box.unselect_all()
+        self._tag_list.unselect_all()
+        self._all_row_box.handler_unblock_by_func(self._on_all_selected)
+        self._tag_list.handler_unblock_by_func(self._on_tag_selected)
+        self._reload()
+
+    def _on_tag_selected(self, listbox, row):
+        """Filter by tag when a row is selected."""
+        if row is None:
+            return
+        self._active_tag = row._filter_value
+        self._active_base_model = None
+        # Deselect sibling lists
+        self._all_row_box.handler_block_by_func(self._on_all_selected)
+        self._base_model_list.handler_block_by_func(
+            self._on_base_model_selected
+        )
+        self._all_row_box.unselect_all()
+        self._base_model_list.unselect_all()
+        self._all_row_box.handler_unblock_by_func(self._on_all_selected)
+        self._base_model_list.handler_unblock_by_func(
+            self._on_base_model_selected
+        )
         self._reload()
 
     # ------------------------------------------------------------------
