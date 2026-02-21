@@ -80,3 +80,9 @@ gutter {
 .completion-popup .item {
     padding: 8px 12px;
 }
+
+.sidebar {
+    background-color: mix(@window_bg_color, white, 0.08);
+    margin: 10px 0px;
+    border-radius: 0px 10px 10px 0px;
+}

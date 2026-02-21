@@ -335,15 +335,16 @@ class LorasPage:
         # Sidebar wrapped in a revealer for the toggle
         self._sidebar_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_RIGHT,
-            reveal_child=True
+            reveal_child=True,
+            css_classes=['sidebar']
         )
         self._sidebar_revealer.set_child(self._build_sidebar())
         content_box.append(self._sidebar_revealer)
 
-        self._sidebar_sep = Gtk.Separator(
-            orientation=Gtk.Orientation.VERTICAL
-        )
-        content_box.append(self._sidebar_sep)
+        # self._sidebar_sep = Gtk.Separator(
+        #     orientation=Gtk.Orientation.VERTICAL
+        # )
+        # content_box.append(self._sidebar_sep)
 
         # Scrolled window containing the flow grid
         scroll = Gtk.ScrolledWindow(
@@ -718,7 +719,7 @@ class LorasPage:
         """Show or hide the sidebar and its separator."""
         visible = btn.get_active()
         self._sidebar_revealer.set_reveal_child(visible)
-        self._sidebar_sep.set_visible(visible)
+        # self._sidebar_sep.set_visible(visible)
 
     def _on_search_changed(self, entry):
         self._search_text = entry.get_text().strip()

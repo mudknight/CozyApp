@@ -219,7 +219,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         self.view_stack.add_titled_with_icon(
             self.loras.widget, 'loras', 'LoRAs',
-            'media-playlist-shuffle-symbolic'
+            'zoom-in-symbolic'
         )
 
         self.view_stack.connect(
