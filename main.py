@@ -20,6 +20,7 @@ import image_cache  # noqa
 from generate import GeneratePage  # noqa
 from gallery import GalleryPage  # noqa
 from presets import PresetsPage  # noqa
+from loras import LorasPage  # noqa
 
 
 def setup_language_manager():
@@ -84,7 +85,7 @@ class ComfyApp(Adw.Application):
 
     def do_command_line(self, command_line):
         args = command_line.get_arguments()
-        self.workflow_file = "workflow.json"
+        self.workflow_file = config.resource_path("workflow.json")
         i = 1
         while i < len(args):
             if args[i] == "-w" and i + 1 < len(args):
@@ -99,9 +100,7 @@ class ComfyApp(Adw.Application):
         icon_theme = Gtk.IconTheme.get_for_display(
             Gdk.Display.get_default()
         )
-        icon_theme.add_search_path(
-            os.path.join(os.path.dirname(__file__), "assets")
-        )
+        icon_theme.add_search_path(config.resource_path("assets"))
         self.win = ComfyWindow(
             application=app, workflow_file=self.workflow_file
         )
@@ -211,6 +210,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.view_stack.add_titled_with_icon(
             self.presets.widget, 'presets', 'Presets',
             'user-bookmarks-symbolic'
+        )
+
+        # LoRAs page
+        self.loras = LorasPage(
+            on_lora_selected=self._on_lora_selected,
+            log_fn=self.log
+        )
+        self.view_stack.add_titled_with_icon(
+            self.loras.widget, 'loras', 'LoRAs',
+            'media-playlist-shuffle-symbolic'
         )
 
         self.view_stack.connect(
@@ -385,6 +394,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Reload style/model lists and all preset sub-pages."""
         self.generate_page.fetch_node_info()
         self.presets.refresh()
+        self.loras.refresh()
 
     def on_show_settings(self, action, param):
         """Show the settings dialog."""
@@ -550,7 +560,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
     def setup_css(self):
         css_provider = Gtk.CssProvider()
-        css_path = os.path.join(os.path.dirname(__file__), 'style.css')
+        css_path = config.resource_path('style.css')
         css_provider.load_from_path(css_path)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -828,6 +838,22 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Insert a tag reference and switch to the generate tab."""
         self.generate_page.insert_tag(tag_name)
         self._show_toast(f"Added tag:{tag_name}")
+        self.view_stack.set_visible_child_name('generate')
+
+    def _on_lora_selected(self, lora_data):
+        """Insert a LoRA tag (and optional trigger words) into the prompt."""
+        file_name = lora_data.get('file_name', '')
+        # Strip extension for the <lora:name:1> syntax
+        stem = (
+            file_name.rsplit('.', 1)[0]
+            if '.' in file_name
+            else file_name
+        )
+        tag = f"<lora:{stem}:1>, "
+        _, end = self.generate_page.pos_buffer.get_bounds()
+        self.generate_page.pos_buffer.insert(end, tag)
+        model_name = lora_data.get('model_name', file_name)
+        self._show_toast(f"Added {model_name}")
         self.view_stack.set_visible_child_name('generate')
 
     # ------------------------------------------------------------------

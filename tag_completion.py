@@ -6,6 +6,7 @@ import csv
 import json
 import urllib.request
 import urllib.error
+import config
 
 
 class TagCompletion:
@@ -56,13 +57,15 @@ class TagCompletion:
             t.strip().lower().replace(' ', '_') for t in tags if t.strip()
         }
 
-    def load_tags(self, filepath='danbooru.csv'):
+    def load_tags(self, filepath=None):
         """
         Load tags from CSV file.
 
         Args:
-            filepath: Path to the CSV file containing tags
+            filepath: Path to the CSV file containing tags (defaults to danbooru.csv)
         """
+        if filepath is None:
+            filepath = config.resource_path('danbooru.csv')
         try:
             tag_list = []
             with open(filepath, 'r', encoding='utf-8') as f:
