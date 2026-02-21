@@ -1309,8 +1309,16 @@ class GeneratePage:
 
                 if msg["type"] == "executing":
                     node_id = msg["data"]["node"]
-                    if node_id is None:
+                    msg_pid = msg["data"].get("prompt_id")
+                    # Only break on completion of *our* prompt; stale
+                    # signals from a previously cancelled job that the
+                    # server finally finished would otherwise terminate
+                    # the loop prematurely and skip the history fetch.
+                    if node_id is None and msg_pid == prompt_id:
                         break
+                    # Skip progress/label updates for other prompts
+                    if msg_pid not in (prompt_id, None):
+                        continue
                     current_index = node_index.get(
                         node_id, current_index
                     )
