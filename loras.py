@@ -238,9 +238,9 @@ class LorasPage:
         self._total_pages = 1
         self._loading = False
         self._search_text = ''
-        # Active sidebar filters
-        self._active_base_model = None
-        self._active_tag = None
+        # Active sidebar filters (sets for multi-select)
+        self._active_base_models = set()
+        self._active_tags = set()
 
         self._build_ui()
         GLib.idle_add(self._fetch_page, 1)
@@ -266,6 +266,18 @@ class LorasPage:
             margin_start=16,
             margin_end=16
         )
+
+        # Sidebar toggle
+        self._sidebar_toggle = Gtk.ToggleButton(
+            icon_name='sidebar-show-symbolic',
+            active=True,
+            tooltip_text='Toggle sidebar'
+        )
+        self._sidebar_toggle.add_css_class('flat')
+        self._sidebar_toggle.connect(
+            'toggled', self._on_sidebar_toggled
+        )
+        toolbar.append(self._sidebar_toggle)
 
         self._search = Gtk.SearchEntry(
             placeholder_text='Search LoRAs…',
@@ -320,13 +332,18 @@ class LorasPage:
         )
         self._root.append(content_box)
 
-        # Sidebar
-        content_box.append(self._build_sidebar())
+        # Sidebar wrapped in a revealer for the toggle
+        self._sidebar_revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_RIGHT,
+            reveal_child=True
+        )
+        self._sidebar_revealer.set_child(self._build_sidebar())
+        content_box.append(self._sidebar_revealer)
 
-        # Separator between sidebar and grid
-        content_box.append(Gtk.Separator(
+        self._sidebar_sep = Gtk.Separator(
             orientation=Gtk.Orientation.VERTICAL
-        ))
+        )
+        content_box.append(self._sidebar_sep)
 
         # Scrolled window containing the flow grid
         scroll = Gtk.ScrolledWindow(
@@ -400,27 +417,17 @@ class LorasPage:
             margin_bottom=8
         )
 
-        # "All" row to clear filters
-        self._all_row_box = Gtk.ListBox(
-            selection_mode=Gtk.SelectionMode.SINGLE,
-            css_classes=['navigation-sidebar']
+        # Clear filters button
+        clear_btn = Gtk.Button(
+            label='Clear Filters',
+            margin_start=8,
+            margin_end=8,
+            margin_top=4,
+            margin_bottom=4
         )
-        all_row = Gtk.ListBoxRow()
-        all_label = Gtk.Label(
-            label='All',
-            xalign=0,
-            margin_start=12,
-            margin_end=12,
-            margin_top=6,
-            margin_bottom=6
-        )
-        all_row.set_child(all_label)
-        self._all_row_box.append(all_row)
-        self._all_row_box.select_row(all_row)
-        self._all_row_box.connect(
-            'row-selected', self._on_all_selected
-        )
-        sidebar.append(self._all_row_box)
+        clear_btn.add_css_class('flat')
+        clear_btn.connect('clicked', self._on_clear_filters)
+        sidebar.append(clear_btn)
 
         # Base model section
         sidebar.append(Gtk.Label(
@@ -428,16 +435,17 @@ class LorasPage:
             xalign=0,
             css_classes=['caption', 'dim-label'],
             margin_start=12,
-            margin_top=12,
+            margin_top=8,
             margin_bottom=4
         ))
         self._base_model_list = Gtk.ListBox(
-            selection_mode=Gtk.SelectionMode.SINGLE,
+            selection_mode=Gtk.SelectionMode.MULTIPLE,
             css_classes=['navigation-sidebar']
         )
         self._base_model_list.connect(
-            'row-selected', self._on_base_model_selected
+            'selected-rows-changed', self._on_base_model_changed
         )
+        self._add_toggle_gesture(self._base_model_list)
         sidebar.append(self._base_model_list)
 
         # Tags section
@@ -450,12 +458,13 @@ class LorasPage:
             margin_bottom=4
         ))
         self._tag_list = Gtk.ListBox(
-            selection_mode=Gtk.SelectionMode.SINGLE,
+            selection_mode=Gtk.SelectionMode.MULTIPLE,
             css_classes=['navigation-sidebar']
         )
         self._tag_list.connect(
-            'row-selected', self._on_tag_selected
+            'selected-rows-changed', self._on_tag_changed
         )
+        self._add_toggle_gesture(self._tag_list)
         sidebar.append(self._tag_list)
 
         sidebar_scroll.set_child(sidebar)
@@ -596,10 +605,15 @@ class LorasPage:
             }
             if search:
                 params['search'] = search
-            if self._active_base_model:
-                params['base_model'] = self._active_base_model
-            if self._active_tag:
-                params['tags'] = self._active_tag
+            # Pass multiple base_model / tag_include params
+            for bm in self._active_base_models:
+                params.setdefault('base_model', [])
+                if isinstance(params['base_model'], list):
+                    params['base_model'].append(bm)
+            for tag in self._active_tags:
+                params.setdefault('tag_include', [])
+                if isinstance(params['tag_include'], list):
+                    params['tag_include'].append(tag)
             url = (
                 f"http://{config.server_address()}"
                 f"/api/lm/loras/list"
@@ -681,6 +695,31 @@ class LorasPage:
     # Search / sort / sidebar
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _add_toggle_gesture(listbox):
+        """Make every click toggle the row instead of requiring Ctrl."""
+        click = Gtk.GestureClick(button=1)
+        click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+        def on_pressed(gesture, n_press, x, y):
+            row = listbox.get_row_at_y(int(y))
+            if row is None:
+                return
+            if row.is_selected():
+                listbox.unselect_row(row)
+            else:
+                listbox.select_row(row)
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        click.connect('pressed', on_pressed)
+        listbox.add_controller(click)
+
+    def _on_sidebar_toggled(self, btn):
+        """Show or hide the sidebar and its separator."""
+        visible = btn.get_active()
+        self._sidebar_revealer.set_reveal_child(visible)
+        self._sidebar_sep.set_visible(visible)
+
     def _on_search_changed(self, entry):
         self._search_text = entry.get_text().strip()
         self._reload()
@@ -688,57 +727,36 @@ class LorasPage:
     def _on_sort_changed(self, dropdown, _param):
         self._reload()
 
-    def _on_all_selected(self, listbox, row):
-        """Clear all filters when the All row is selected."""
-        if row is None:
-            return
-        self._active_base_model = None
-        self._active_tag = None
-        # Deselect the other lists without triggering their handlers
+    def _on_clear_filters(self, _btn):
+        """Deselect all sidebar rows and clear active filters."""
         self._base_model_list.handler_block_by_func(
-            self._on_base_model_selected
+            self._on_base_model_changed
         )
-        self._tag_list.handler_block_by_func(self._on_tag_selected)
+        self._tag_list.handler_block_by_func(self._on_tag_changed)
         self._base_model_list.unselect_all()
         self._tag_list.unselect_all()
         self._base_model_list.handler_unblock_by_func(
-            self._on_base_model_selected
+            self._on_base_model_changed
         )
-        self._tag_list.handler_unblock_by_func(self._on_tag_selected)
+        self._tag_list.handler_unblock_by_func(self._on_tag_changed)
+        self._active_base_models.clear()
+        self._active_tags.clear()
         self._reload()
 
-    def _on_base_model_selected(self, listbox, row):
-        """Filter by base model when a row is selected."""
-        if row is None:
-            return
-        self._active_base_model = row._filter_value
-        self._active_tag = None
-        # Deselect sibling lists
-        self._all_row_box.handler_block_by_func(self._on_all_selected)
-        self._tag_list.handler_block_by_func(self._on_tag_selected)
-        self._all_row_box.unselect_all()
-        self._tag_list.unselect_all()
-        self._all_row_box.handler_unblock_by_func(self._on_all_selected)
-        self._tag_list.handler_unblock_by_func(self._on_tag_selected)
+    def _on_base_model_changed(self, listbox):
+        """Update active base model filter set from current selection."""
+        self._active_base_models = {
+            row._filter_value
+            for row in listbox.get_selected_rows()
+        }
         self._reload()
 
-    def _on_tag_selected(self, listbox, row):
-        """Filter by tag when a row is selected."""
-        if row is None:
-            return
-        self._active_tag = row._filter_value
-        self._active_base_model = None
-        # Deselect sibling lists
-        self._all_row_box.handler_block_by_func(self._on_all_selected)
-        self._base_model_list.handler_block_by_func(
-            self._on_base_model_selected
-        )
-        self._all_row_box.unselect_all()
-        self._base_model_list.unselect_all()
-        self._all_row_box.handler_unblock_by_func(self._on_all_selected)
-        self._base_model_list.handler_unblock_by_func(
-            self._on_base_model_selected
-        )
+    def _on_tag_changed(self, listbox):
+        """Update active tag filter set from current selection."""
+        self._active_tags = {
+            row._filter_value
+            for row in listbox.get_selected_rows()
+        }
         self._reload()
 
     # ------------------------------------------------------------------
