@@ -89,6 +89,11 @@ class LoraCard(Gtk.Frame):
         click.connect('released', self._on_click)
         self.add_controller(click)
 
+        # Right click for context menu
+        rclick = Gtk.GestureClick(button=3)
+        rclick.connect('released', self._on_right_click)
+        self.add_controller(rclick)
+
         # Load preview image in the background
         preview_url = lora_data.get('preview_url', '')
         if preview_url:
@@ -125,6 +130,92 @@ class LoraCard(Gtk.Frame):
     def _on_click(self, gesture, n_press, x, y):
         if self.on_click:
             self.on_click(self.lora_data)
+
+    def _on_right_click(self, gesture, n_press, x, y):
+        """Show a context menu with card actions."""
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        popover = Gtk.Popover(has_arrow=False)
+        popover.set_parent(self)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=2,
+            margin_top=4, margin_bottom=4,
+            margin_start=4, margin_end=4
+        )
+        delete_btn = Gtk.Button(label='Delete', has_frame=False)
+        delete_btn.add_css_class('destructive-action')
+        delete_btn.set_halign(Gtk.Align.FILL)
+        delete_btn.connect(
+            'clicked',
+            lambda _: (popover.popdown(), self._confirm_delete())
+        )
+        box.append(delete_btn)
+        popover.set_child(box)
+        popover.popup()
+
+    def _confirm_delete(self):
+        """Show a confirmation dialog before deleting."""
+        name = self.lora_data.get('model_name', 'this LoRA')
+        dialog = Adw.AlertDialog(
+            heading='Delete LoRA?',
+            body=f'\u201c{name}\u201d will be permanently deleted from disk.'
+        )
+        dialog.add_response('cancel', 'Cancel')
+        dialog.add_response('delete', 'Delete')
+        dialog.set_response_appearance(
+            'delete', Adw.ResponseAppearance.DESTRUCTIVE
+        )
+        dialog.set_default_response('cancel')
+        dialog.set_close_response('cancel')
+        dialog.connect('response', self._on_delete_response)
+        dialog.present(self.get_root())
+
+    def _on_delete_response(self, dialog, response):
+        """Fire off the delete request if confirmed."""
+        if response != 'delete':
+            return
+        file_path = self.lora_data.get('file_path', '')
+        if not file_path:
+            return
+        threading.Thread(
+            target=self._delete_worker,
+            args=(file_path,),
+            daemon=True
+        ).start()
+
+    def _delete_worker(self, file_path):
+        """POST delete request to Lora Manager."""
+        try:
+            url = (
+                f"http://{config.server_address()}"
+                f"/api/lm/loras/delete"
+            )
+            resp = requests.post(
+                url, json={'file_path': file_path}, timeout=10
+            )
+            if resp.status_code == 200:
+                # Remove the card from the FlowBox on the main thread
+                GLib.idle_add(self._remove_self)
+            else:
+                print(
+                    f"[loras] delete error {resp.status_code}: "
+                    f"{resp.text[:200]}"
+                )
+        except Exception as e:
+            print(f"[loras] delete exception: {e}")
+
+    def _remove_self(self):
+        """Remove this card from its FlowBox parent."""
+        parent = self.get_parent()
+        if parent:
+            flow = parent.get_parent()
+            if flow:
+                flow.remove(parent)
 
 
 class LorasPage:
