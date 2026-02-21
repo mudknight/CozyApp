@@ -469,20 +469,42 @@ class LorasPage:
             daemon=True
         ).start()
 
+    @staticmethod
+    def _parse_civitai_url(url):
+        """
+        Extract model_id and model_version_id from a CivitAI URL.
+        Returns (model_id, version_id) as ints or None.
+        """
+        import re
+        version_id = None
+        # modelVersionId in query string takes priority
+        m = re.search(r'modelVersionId=(\d+)', url, re.IGNORECASE)
+        if m:
+            version_id = int(m.group(1))
+        # /models/<id> in path
+        m = re.search(r'/models/(\d+)', url)
+        model_id = int(m.group(1)) if m else None
+        return model_id, version_id
+
     def _install_worker(self, url):
-        """POST to Lora Manager's download endpoint."""
+        """POST to Lora Manager's /api/lm/download-model endpoint."""
+        model_id, version_id = self._parse_civitai_url(url)
+        if model_id is None and version_id is None:
+            self.log_fn("[loras] install error: could not parse model ID from URL")
+            return
+        payload = {'use_default_paths': True}
+        if version_id:
+            payload['model_version_id'] = version_id
+        else:
+            payload['model_id'] = model_id
         try:
             api_url = (
                 f"http://{config.server_address()}"
-                f"/api/lm/loras/civitai/download"
+                f"/api/lm/download-model"
             )
-            resp = requests.post(
-                api_url,
-                json={'url': url, 'save_path': ''},
-                timeout=30
-            )
+            resp = requests.post(api_url, json=payload, timeout=30)
             if resp.status_code == 200:
-                self.log_fn(f"[loras] install queued for {url}")
+                self.log_fn(f"[loras] download queued: {url}")
                 GLib.idle_add(self._reload)
             else:
                 self.log_fn(
