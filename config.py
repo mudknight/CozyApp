@@ -13,6 +13,7 @@ _DEFAULTS = {
     "port": 8188,
     "tag_blacklist": [],
     "cache_max_age_days": 1,
+    "completion_max_items": 10,
 }
 
 # In-memory config dict, populated by load()

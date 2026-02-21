@@ -9,6 +9,11 @@ import urllib.error
 import config
 
 
+def _max_items():
+    """Return the configured max number of completion suggestions."""
+    return int(config.get('completion_max_items') or 10)
+
+
 class TagCompletion:
     """
     Handles tag autocompletion from danbooru.csv file.
@@ -271,14 +276,14 @@ class TagCompletion:
 
                 if not search:
                     # Return all LoRAs if nothing typed yet
-                    return self.loras[:10]
+                    return self.loras[:_max_items()]
                 # Match against the filename only (after last /),
                 # using substring so partial names resolve correctly
                 matches = [
                     lora for lora in self.loras
                     if search in lora.split('/')[-1].lower()
                 ]
-                return matches[:10]
+                return matches[:_max_items()]
 
             # Handle character completion (depth-aware)
             prefix, search = current.rsplit(':', 1)
@@ -288,12 +293,12 @@ class TagCompletion:
             if prefix == 'character':
                 # depth 1: completing character name
                 if not search:
-                    return self.characters[:10]
+                    return self.characters[:_max_items()]
                 matches = [
                     char for char in self.characters
                     if search in char.split('/')[-1].lower()
                 ]
-                return matches[:10]
+                return matches[:_max_items()]
 
             if prefix.startswith('character:'):
                 # depth 2 (outfit) or depth 3 (top/bottom)
@@ -302,10 +307,10 @@ class TagCompletion:
                     # depth 2: completing outfit name
                     outfits = self._get_outfits(parts[1])
                     if not search:
-                        return outfits[:10]
+                        return outfits[:_max_items()]
                     return [
                         o for o in outfits if search in o.lower()
-                    ][:10]
+                    ][:_max_items()]
                 elif len(parts) == 3:
                     # depth 3: completing top or bottom
                     options = ['top', 'bottom']
@@ -318,12 +323,12 @@ class TagCompletion:
             # Handle tag preset completion: tag:name
             if prefix == 'tag':
                 if not search:
-                    return self.tag_presets[:10]
+                    return self.tag_presets[:_max_items()]
                 matches = [
                     preset for preset in self.tag_presets
                     if search in preset.lower()
                 ]
-                return matches[:10]
+                return matches[:_max_items()]
 
         current = current.lower()
 
@@ -350,18 +355,18 @@ class TagCompletion:
                 prefix_matches.append(tag)
             elif current in tl:
                 substr_matches.append(tag)
-            if len(prefix_matches) >= 10:
+            if len(prefix_matches) >= _max_items():
                 break
 
         for tag in prefix_matches + substr_matches:
             if tag not in seen:
                 matches.append(tag)
                 seen.add(tag)
-            if len(matches) >= 10:
+            if len(matches) >= _max_items():
                 break
 
         # Search in aliases
-        if len(matches) < 10:
+        if len(matches) < _max_items():
             for alias, original_tag in self.tag_aliases.items():
                 al = alias.lower()
                 if al == current:
@@ -373,10 +378,10 @@ class TagCompletion:
                     if original_tag not in seen:
                         matches.append(original_tag)
                         seen.add(original_tag)
-                    if len(matches) >= 10:
+                    if len(matches) >= _max_items():
                         break
 
-        return matches[:10]
+        return matches[:_max_items()]
 
     def _get_outfits(self, character_name):
         """
@@ -454,14 +459,10 @@ class TagCompletion:
 
         self.listbox.connect("row-activated", on_row_activated)
 
-        self.scrolled = Gtk.ScrolledWindow()
-        self.scrolled.set_child(self.listbox)
-        self.scrolled.set_max_content_height(300)
-        self.scrolled.set_policy(
-            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
-        )
-
-        popover.set_child(self.scrolled)
+        # No ScrolledWindow — completions are capped at 10 so scrolling
+        # is never needed, and removing it lets the popover size to the
+        # exact height of the list with no clamping or extra padding.
+        popover.set_child(self.listbox)
 
         self.completion_popup = popover
 
@@ -617,10 +618,8 @@ class TagCompletion:
         # Populate with new suggestions
         self._populate_listbox(suggestions)
 
-        # Update scrolled window size
-        self.scrolled.set_size_request(
-            400, min(len(suggestions) * 40, 300)
-        )
+        # Fix the width; height is determined naturally by the list.
+        self.listbox.set_size_request(400, -1)
 
         # Position and show
         self._position_popup(textview)
@@ -669,12 +668,12 @@ class TagCompletion:
             # Sentinel: insert prefix and immediately show character list
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, 'character:')
-            GLib.idle_add(self.show_popup, textview, self.characters[:10])
+            GLib.idle_add(self.show_popup, textview, self.characters[:_max_items()])
         elif tag == 'tag' and not is_tag_preset and not is_character:
             # Sentinel: insert prefix and immediately show tag preset list
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, 'tag:')
-            GLib.idle_add(self.show_popup, textview, self.tag_presets[:10])
+            GLib.idle_add(self.show_popup, textview, self.tag_presets[:_max_items()])
         elif is_character:
             # Depth-aware: count colons to determine flow stage
             depth = replaced_text.count(':')

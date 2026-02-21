@@ -440,6 +440,23 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         cache_group.add(cache_row)
 
+        # --- Tag completion group ---
+        completion_group = Adw.PreferencesGroup(
+            title="Tag Completion",
+            description="Controls for the autocomplete popup."
+        )
+        page.add(completion_group)
+
+        completion_adj = Gtk.Adjustment(
+            value=config.get("completion_max_items"),
+            lower=1, upper=25, step_increment=1
+        )
+        completion_row = Adw.SpinRow(
+            title="Max suggestions shown",
+            adjustment=completion_adj
+        )
+        completion_group.add(completion_row)
+
         # --- Tag blacklist group ---
         bl_group = Adw.PreferencesGroup(
             title="Tag Blacklist",
@@ -494,6 +511,9 @@ class ComfyWindow(Adw.ApplicationWindow):
                 "cache_max_age_days", int(cache_adj.get_value())
             )
             config.set("tag_blacklist", list(blacklist))
+            config.set(
+                "completion_max_items", int(completion_adj.get_value())
+            )
             config.save()
             # Apply to the live tag completion instance
             self.generate_page.tag_completion.set_blacklist(blacklist)
