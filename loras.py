@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """LoRAs page: browsable grid of LoRA cards from ComfyUI-Lora-Manager."""
 import threading
+import weakref
 import requests
 import gi
 import config
@@ -15,6 +16,10 @@ from gi.repository import Gtk, Adw, GLib, Gdk, Pango, GdkPixbuf  # noqa
 THUMB_SIZE = 200
 # Number of loras per API page
 PAGE_SIZE = 48
+# Module-level preview cache: URL -> scaled GdkPixbuf at THUMB_SIZE.
+# Persists across reloads; only the small version is kept in memory.
+_preview_cache: dict = {}
+_preview_cache_lock = threading.Lock()
 
 
 def _pixbuf_to_texture(pixbuf):
@@ -94,31 +99,69 @@ class LoraCard(Gtk.Frame):
         rclick.connect('released', self._on_right_click)
         self.add_controller(rclick)
 
-        # Load preview image in the background
+        # Load preview image in the background.
+        # Use a weakref so the thread doesn't keep removed cards alive.
         preview_url = lora_data.get('preview_url', '')
         if preview_url:
             threading.Thread(
                 target=self._load_preview,
-                args=(preview_url,),
+                args=(weakref.ref(self), preview_url),
                 daemon=True
             ).start()
 
-    def _load_preview(self, url):
-        """Fetch preview image from the Lora Manager static URL."""
-        # URLs from the API can be relative (/lm-static/…) or absolute
+    @staticmethod
+    def _load_preview(weak_self, url):
+        """Fetch, scale, and cache preview; update card if still alive."""
+        # Resolve relative URLs
         if url.startswith('/'):
             url = f"http://{config.server_address()}{url}"
-        try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
+
+        # Check module-level cache for an already-scaled pixbuf
+        with _preview_cache_lock:
+            pixbuf = _preview_cache.get(url)
+
+        if pixbuf is None:
+            try:
+                resp = requests.get(url, timeout=10)
+                if resp.status_code != 200:
+                    return
                 loader = GdkPixbuf.PixbufLoader.new()
                 loader.write(resp.content)
                 loader.close()
-                pixbuf = loader.get_pixbuf()
-                if pixbuf:
-                    GLib.idle_add(self._set_texture, pixbuf)
-        except Exception:
-            pass  # Missing previews are fine — card stays blank
+                full = loader.get_pixbuf()
+            except Exception:
+                return  # Missing previews are fine
+
+            if not full:
+                return
+
+            # Scale to a square THUMB_SIZE crop (cover fit) so only
+            # the small version is ever held in memory.
+            src_w = full.get_width()
+            src_h = full.get_height()
+            scale = max(THUMB_SIZE / src_w, THUMB_SIZE / src_h)
+            scaled_w = max(1, int(src_w * scale))
+            scaled_h = max(1, int(src_h * scale))
+            pixbuf = full.scale_simple(
+                scaled_w, scaled_h,
+                GdkPixbuf.InterpType.BILINEAR
+            )
+            # Let the full-size pixbuf go out of scope immediately
+            del full
+
+            with _preview_cache_lock:
+                _preview_cache[url] = pixbuf
+
+        if not pixbuf:
+            return
+
+        # Only schedule the UI update if the card is still alive
+        def apply(pb=pixbuf, wr=weak_self):
+            card = wr()
+            if card is not None:
+                card._set_texture(pb)
+
+        GLib.idle_add(apply)
 
     def _set_texture(self, pixbuf):
         self.picture.set_paintable(_pixbuf_to_texture(pixbuf))
