@@ -340,26 +340,18 @@ class TagCompletion:
         matches = []
         seen = set()
 
-        # Search in sorted tags (already sorted by usage)
-        # Prefix matches first, then substring matches
-        prefix_matches = []
-        substr_matches = []
+        # Search in sorted tags (already sorted by usage descending)
+        # Use substring matching so higher-usage tags rank above lower-usage
+        # prefix-only matches (e.g. sakuragi_mano > mano_aloe for "mano")
         for tag in self.sorted_tags:
             tl = tag.lower()
             # Skip blacklisted tags
             if tl in self._blacklist:
                 continue
-            if tl.startswith(current):
-                prefix_matches.append(tag)
-            elif current in tl:
-                substr_matches.append(tag)
-            if len(prefix_matches) >= _max_items():
-                break
-
-        for tag in prefix_matches + substr_matches:
-            if tag not in seen:
-                matches.append(tag)
-                seen.add(tag)
+            if any(w.startswith(current) for w in tl.split('_')):
+                if tag not in seen:
+                    matches.append(tag)
+                    seen.add(tag)
             if len(matches) >= _max_items():
                 break
 
@@ -791,6 +783,9 @@ class TagCompletion:
             # Strip trailing colon if we're mid-character-flow
             self._strip_character_colon(textview)
             return True
+        elif keyval in (Gdk.KEY_Left, Gdk.KEY_Right):
+            self.completion_popup.popdown()
+            return False
         elif keyval == Gdk.KEY_Down:
             selected = self.listbox.get_selected_row()
             if selected:
