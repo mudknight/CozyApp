@@ -346,8 +346,6 @@ class TagCompletion:
         substr_matches = []
         for tag in self.sorted_tags:
             tl = tag.lower()
-            if tl == current:
-                continue
             # Skip blacklisted tags
             if tl in self._blacklist:
                 continue
