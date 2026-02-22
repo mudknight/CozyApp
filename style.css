@@ -73,6 +73,16 @@ gutter {
 .job-processing {
     background-color: alpha(@accent_bg_color, 0.1);
 }
+list.job-list {
+    background: transparent;
+    border: none;
+}
+list.job-list row {
+    background-color: alpha(currentColor, 0.05);
+    border-radius: 8px;
+    margin-bottom: 4px;
+}
+list.job-list row:last-child { margin-bottom: 0; }
 .completion-popup > contents { padding: 0; }
 .completion-popup list {
     background-color: mix(@window_bg_color, white, 0.08);

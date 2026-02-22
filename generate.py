@@ -391,7 +391,7 @@ class GeneratePage:
 
         self._job_listbox = Gtk.ListBox(
             selection_mode=Gtk.SelectionMode.NONE,
-            css_classes=["boxed-list"]
+            css_classes=["job-list"]
         )
         self._job_listbox.set_placeholder(Gtk.Label(
             label="No jobs queued",
@@ -421,7 +421,9 @@ class GeneratePage:
         )
         popover_box.append(popover_scroll)
 
-        self._queue_popover = Gtk.Popover()
+        self._queue_popover = Gtk.Popover(
+            css_classes=["queue-popover"]
+        )
         self._queue_popover.set_child(popover_box)
         self._queue_popover.set_autohide(True)
 
