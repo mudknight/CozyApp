@@ -651,12 +651,14 @@ class TagCompletion:
         is_lora = '<lora:' in replaced_text.lower()
         is_tag_preset = replaced_text.lower().startswith('tag:')
 
+        # Don't add a trailing comma if one already follows the cursor
+        trailing = ', ' if iter_cursor.get_char() != ',' else ''
+
         if is_lora:
             # For LoRAs, insert full syntax with default weight
             formatted_tag = f"<lora:{tag}:1.0>"
             buffer.delete(iter_start, iter_cursor)
-            buffer.insert(iter_start, formatted_tag + ", ")
-        elif tag == 'character' and not is_character and not is_tag_preset:
+            buffer.insert(iter_start, formatted_tag + trailing)
             # Sentinel: insert prefix and immediately show character list
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, 'character:')
@@ -694,13 +696,13 @@ class TagCompletion:
                 buffer.delete(iter_start, iter_cursor)
                 buffer.insert(
                     iter_start,
-                    f'character:{char_name}:{outfit}:{tag}, '
+                    f'character:{char_name}:{outfit}:{tag}' + trailing
                 )
         elif is_tag_preset:
             # For tag presets, preserve the tag: prefix
             formatted_tag = f"tag:{tag}"
             buffer.delete(iter_start, iter_cursor)
-            buffer.insert(iter_start, formatted_tag + ", ")
+            buffer.insert(iter_start, formatted_tag + trailing)
         else:
             # For regular tags, replace underscores and escape parens
             formatted_tag = tag.replace('_', ' ')
@@ -708,7 +710,7 @@ class TagCompletion:
                 '(', '\\('
             ).replace(')', '\\)')
             buffer.delete(iter_start, iter_cursor)
-            buffer.insert(iter_start, formatted_tag + ", ")
+            buffer.insert(iter_start, formatted_tag + trailing)
 
     def should_show_completion(self, buffer, iter_cursor):
         """
