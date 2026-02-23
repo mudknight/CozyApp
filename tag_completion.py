@@ -659,6 +659,7 @@ class TagCompletion:
             formatted_tag = f"<lora:{tag}:1.0>"
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, formatted_tag + trailing)
+        elif tag == 'character' and not is_character and not is_tag_preset:
             # Sentinel: insert prefix and immediately show character list
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, 'character:')
