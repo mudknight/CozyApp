@@ -348,7 +348,9 @@ class TagCompletion:
             # Skip blacklisted tags
             if tl in self._blacklist:
                 continue
-            if any(w.startswith(current) for w in tl.split('_')):
+            # Match if current appears at a word boundary (start of any
+            # underscore-separated word, including the first)
+            if ('_' + current) in ('_' + tl):
                 if tag not in seen:
                     matches.append(tag)
                     seen.add(tag)
