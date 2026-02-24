@@ -21,6 +21,7 @@ from generate import GeneratePage  # noqa
 from gallery import GalleryPage  # noqa
 from presets import PresetsPage  # noqa
 from loras import LorasPage  # noqa
+from models import ModelsPage  # noqa
 
 
 def setup_language_manager():
@@ -222,6 +223,16 @@ class ComfyWindow(Adw.ApplicationWindow):
             'zoom-in-symbolic'
         )
 
+        # Models page
+        self.models = ModelsPage(
+            on_model_selected=self._on_model_selected,
+            log_fn=self.log
+        )
+        self.view_stack.add_titled_with_icon(
+            self.models.widget, 'models', 'Models',
+            'drive-multidisk-symbolic'
+        )
+
         self.view_stack.connect(
             'notify::visible-child', self._on_tab_changed
         )
@@ -395,6 +406,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.generate_page.fetch_node_info()
         self.presets.refresh()
         self.loras.refresh()
+        self.models.refresh()
 
     def on_show_settings(self, action, param):
         """Show the settings dialog."""
@@ -874,6 +886,16 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.generate_page.pos_buffer.insert(end, tag)
         model_name = lora_data.get('model_name', file_name)
         self._show_toast(f"Added {model_name}")
+        self.view_stack.set_visible_child_name('generate')
+
+    def _on_model_selected(self, model_data):
+        """Set the model dropdown and switch to the generate tab."""
+        file_name = model_data.get('file_name', '')
+        if self.generate_page.set_model(file_name):
+            model_name = model_data.get('model_name', file_name)
+            self._show_toast(f"Model set to {model_name}")
+        else:
+            self.log(f"Model {file_name} not found in dropdown list")
         self.view_stack.set_visible_child_name('generate')
 
     # ------------------------------------------------------------------

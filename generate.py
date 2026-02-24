@@ -553,6 +553,15 @@ class GeneratePage:
             return True
         return False
 
+    def set_model(self, model_name):
+        """Select a model in the model dropdown by name."""
+        if model_name in self.model_list:
+            self.model_dropdown.set_selected(
+                self.model_list.index(model_name)
+            )
+            return True
+        return False
+
     def queue_generate(self):
         """Trigger a generation (keyboard shortcut entry point)."""
         self.on_generate_clicked(None)
