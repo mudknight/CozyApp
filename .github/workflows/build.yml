@@ -70,7 +70,10 @@ jobs:
             zip
           
           # Install Python dependencies
-          pip install -r requirements.txt
+          # Exclude PyGObject and pycairo (use system packages)
+          grep -v -E '(PyGObject|pycairo)' requirements.txt > \
+            requirements_filtered.txt
+          pip install -r requirements_filtered.txt
           
           # Build with PyInstaller
           pyinstaller --clean cozyapp.spec
