@@ -19,14 +19,24 @@ class TagCompletion:
     Handles tag autocompletion from danbooru.csv file.
     """
 
-    # Category color mapping
+    # Category name + CSS class mapping (color defined in style.css)
     CATEGORY_COLORS = {
         0: ('#4A90E2', 'General'),       # Blue
-        1: ('#F5A623', 'Artist'),        # Orange
+        1: ('#D0021B', 'Artist'),        # Red
         2: ('#9B9B9B', 'Unused'),        # Gray
         3: ('#BD10E0', 'Copyright'),     # Purple
         4: ('#7ED321', 'Character'),     # Green
-        5: ('#D0021B', 'Post'),          # Red
+        5: ('#F5A623', 'Meta'),          # Yellow
+    }
+
+    # Map category index -> CSS badge class
+    CATEGORY_CSS = {
+        0: 'badge-general',
+        1: 'badge-artist',
+        2: 'badge-unused',
+        3: 'badge-copyright',
+        4: 'badge-character',
+        5: 'badge-meta',
     }
 
     def __init__(self, log_callback=None):
@@ -423,6 +433,22 @@ class TagCompletion:
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, text[:-1] + ', ')
 
+    def _make_badge(self, text, css_class):
+        """
+        Create a rounded badge label styled via CSS.
+
+        Args:
+            text: Label text to display
+            css_class: CSS class controlling badge background colour
+
+        Returns:
+            Gtk.Label styled as a badge
+        """
+        label = Gtk.Label(label=text)
+        label.add_css_class('tag-badge')
+        label.add_css_class(css_class)
+        return label
+
     def _create_popup(self, textview):
         """
         Create the completion popup structure once.
@@ -487,26 +513,17 @@ class TagCompletion:
 
             # Check if this is a character, LoRA, or regular tag
             if tag == 'character':
-                badge = Gtk.Label()
-                badge.set_markup(
-                    '<span background="#50C878" '
-                    'foreground="white" weight="bold"> '
-                    'CHARACTER </span>'
-                )
-                hbox.append(badge)
+                hbox.append(self._make_badge('Character', 'badge-char'))
             elif tag == 'tag':
-                badge = Gtk.Label()
-                badge.set_markup(
-                    '<span background="#5C6BC0" '
-                    'foreground="white" weight="bold"> '
-                    'TAG </span>'
-                )
-                hbox.append(badge)
+                hbox.append(self._make_badge('Tag', 'badge-tag'))
             elif tag in self.tag_data:
                 # Get tag data for regular tags
                 category, usage = self.tag_data.get(tag, (0, 0))
-                color, cat_name = self.CATEGORY_COLORS.get(
+                _, cat_name = self.CATEGORY_COLORS.get(
                     category, ('#CCCCCC', 'Unknown')
+                )
+                css_class = self.CATEGORY_CSS.get(
+                    category, 'badge-general'
                 )
 
                 # Category box
@@ -514,15 +531,10 @@ class TagCompletion:
                     orientation=Gtk.Orientation.HORIZONTAL, spacing=4
                 )
 
-                # Colored category indicator
-                cat_label = Gtk.Label(label=cat_name[0])
-                cat_label.set_size_request(20, 20)
-                cat_label.set_markup(
-                    f'<span background="{color}" '
-                    f'foreground="white" weight="bold"> '
-                    f'{cat_name[0]} </span>'
+                # Rounded category badge with full name
+                cat_box.append(
+                    self._make_badge(cat_name, css_class)
                 )
-                cat_box.append(cat_label)
 
                 # Usage label
                 usage_label = Gtk.Label(
@@ -535,32 +547,14 @@ class TagCompletion:
 
                 hbox.append(cat_box)
             elif tag in self.loras:
-                # For LoRAs, add a badge
-                lora_badge = Gtk.Label()
-                lora_badge.set_markup(
-                    '<span background="#FF6B6B" '
-                    'foreground="white" weight="bold"> '
-                    'LORA </span>'
-                )
-                hbox.append(lora_badge)
+                hbox.append(self._make_badge('LoRA', 'badge-lora'))
             elif tag in self.tag_presets:
-                # For tag presets, add a badge
-                preset_badge = Gtk.Label()
-                preset_badge.set_markup(
-                    '<span background="#5C6BC0" '
-                    'foreground="white" weight="bold"> '
-                    'TAG </span>'
-                )
-                hbox.append(preset_badge)
+                hbox.append(self._make_badge('Tag', 'badge-tag'))
             else:
-                # For characters, add a badge
-                char_badge = Gtk.Label()
-                char_badge.set_markup(
-                    '<span background="#50C878" '
-                    'foreground="white" weight="bold"> '
-                    'CHARACTER </span>'
+                # Treat as character name
+                hbox.append(
+                    self._make_badge('Character', 'badge-char')
                 )
-                hbox.append(char_badge)
 
             row.set_child(hbox)
             self.listbox.append(row)

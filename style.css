@@ -83,13 +83,38 @@ list.job-list row {
     margin-bottom: 4px;
 }
 list.job-list row:last-child { margin-bottom: 0; }
-.completion-popup > contents { padding: 0; }
+.completion-popup > contents {
+    padding: 6px;
+    border-radius: 12px;
+}
 .completion-popup list {
-    background-color: mix(@window_bg_color, white, 0.08);
+    background-color: transparent;
+    border-radius: 8px;
+}
+.completion-popup list row {
+    border-radius: 8px;
 }
 .completion-popup .item {
-    padding: 8px 12px;
+    padding: 6px 10px;
 }
+
+/* Category/type badges in the tag completion popover */
+.tag-badge {
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-weight: bold;
+    font-size: 0.8em;
+    color: white;
+}
+.badge-general   { background-color: var(--accent-blue); }
+.badge-artist    { background-color: var(--accent-red); }
+.badge-unused    { background-color: var(--accent-slate); }
+.badge-copyright { background-color: var(--accent-purple); }
+.badge-character { background-color: var(--accent-green); }
+.badge-meta      { background-color: var(--accent-yellow); }
+.badge-lora      { background-color: var(--accent-pink); }
+.badge-tag       { background-color: var(--accent-slate); }
+.badge-char      { background-color: var(--accent-teal); }
 
 .sidebar {
     background-color: mix(@window_bg_color, white, 0.08);
