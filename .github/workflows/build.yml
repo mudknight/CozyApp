@@ -1,5 +1,8 @@
 name: Build CozyApp
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
