@@ -1,0 +1,167 @@
+name: Build CozyApp
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        distro: [archlinux, ubuntu]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build on Arch Linux
+        if: matrix.distro == 'archlinux'
+        uses: addnab/docker-run-action@v3
+        with:
+          image: archlinux:latest
+          options: -v ${{ github.workspace }}:/workspace
+          run: |
+            cd /workspace
+            
+            # Update system and install dependencies
+            pacman -Syu --noconfirm
+            pacman -S --noconfirm \
+              python \
+              python-pip \
+              gtk4 \
+              libadwaita \
+              gtksourceview5 \
+              python-gobject \
+              python-cairo \
+              base-devel \
+              zip
+            
+            # Install Python dependencies
+            pip install --break-system-packages -r requirements.txt
+            
+            # Build with PyInstaller
+            pyinstaller --clean cozyapp.spec
+            
+            # Create archive
+            cd dist
+            zip -r cozyapp-archlinux.zip cozyapp
+
+      - name: Build on Ubuntu
+        if: matrix.distro == 'ubuntu'
+        run: |
+          # Install system dependencies
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3 \
+            python3-pip \
+            python3-gi \
+            python3-gi-cairo \
+            gir1.2-gtk-4.0 \
+            gir1.2-adw-1 \
+            gir1.2-gtksource-5 \
+            libgirepository1.0-dev \
+            gcc \
+            libcairo2-dev \
+            pkg-config \
+            python3-dev \
+            zip
+          
+          # Install Python dependencies
+          pip install -r requirements.txt
+          
+          # Build with PyInstaller
+          pyinstaller --clean cozyapp.spec
+          
+          # Create archive
+          cd dist
+          zip -r cozyapp-ubuntu.zip cozyapp
+
+      - name: Upload Arch Linux artifact
+        if: matrix.distro == 'archlinux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cozyapp-archlinux
+          path: dist/cozyapp-archlinux.zip
+
+      - name: Upload Ubuntu artifact
+        if: matrix.distro == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cozyapp-ubuntu
+          path: dist/cozyapp-ubuntu.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Arch Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cozyapp-archlinux
+          path: ./artifacts
+
+      - name: Download Ubuntu artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cozyapp-ubuntu
+          path: ./artifacts
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Get the tag name
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 \
+            "${TAG_NAME}^" 2>/dev/null || echo "")
+          
+          # Generate changelog
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changes since ${PREV_TAG}" > notes.md
+            echo "" >> notes.md
+            git log ${PREV_TAG}..${TAG_NAME} \
+              --pretty=format:"* %s (%h)" >> notes.md
+          else
+            echo "## Initial Release" > notes.md
+          fi
+          
+          echo "" >> notes.md
+          echo "## Downloads" >> notes.md
+          echo "" >> notes.md
+          echo "* \`cozyapp-archlinux.zip\` - Arch Linux build" \
+            >> notes.md
+          echo "* \`cozyapp-ubuntu.zip\` - Ubuntu build" >> notes.md
+
+      - name: Check if pre-release
+        id: prerelease
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          if echo "$TAG_NAME" | grep -qE '(alpha|beta|rc|pre)'; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: ${{ github.ref_name }}
+          body_path: notes.md
+          files: |
+            ./artifacts/cozyapp-archlinux.zip
+            ./artifacts/cozyapp-ubuntu.zip
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
