@@ -13,7 +13,10 @@ A cozy GTK frontend for ComfyUI using LibAdwaita and custom nodes, designed to s
 > [!NOTE]
 > My node pack is currently required for this program to function. I'd like to include a more simplified workflow without a detailer that uses all built-in nodes, but it currently depends on my nodes for detailing.
 
-The only required node packs should be [Impact pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack), [Impact subpack](https://github.com/ltdrdata/ComfyUI-Impact-Subpack), and [Mudknight utils](https://github.com/mudknight/comfyui-mudknight-utils).
+- [Impact pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack)
+- [Impact subpack](https://github.com/ltdrdata/ComfyUI-Impact-Subpack)
+- [Mudknight utils](https://github.com/mudknight/comfyui-mudknight-utils)
+- [LoRA Manager](https://github.com/willmiao/ComfyUI-Lora-Manager)
 
 ### Development
 Set up a venv:
