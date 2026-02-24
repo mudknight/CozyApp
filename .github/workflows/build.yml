@@ -36,10 +36,6 @@ jobs:
             
             # Build with PyInstaller
             pyinstaller --clean cozyapp.spec
-            
-            # Create archive
-            cd dist
-            zip -r cozyapp-archlinux.zip cozyapp
 
       - name: Build on Ubuntu
         if: matrix.distro == 'ubuntu'
@@ -53,24 +49,20 @@ jobs:
           
           # Build with PyInstaller
           pyinstaller --clean cozyapp.spec
-          
-          # Create archive
-          cd dist
-          zip -r cozyapp-ubuntu.zip cozyapp
 
       - name: Upload Arch Linux artifact
         if: matrix.distro == 'archlinux'
         uses: actions/upload-artifact@v4
         with:
           name: cozyapp-archlinux
-          path: dist/cozyapp-archlinux.zip
+          path: dist/cozyapp
 
       - name: Upload Ubuntu artifact
         if: matrix.distro == 'ubuntu'
         uses: actions/upload-artifact@v4
         with:
           name: cozyapp-ubuntu
-          path: dist/cozyapp-ubuntu.zip
+          path: dist/cozyapp
 
   release:
     needs: build
@@ -87,13 +79,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cozyapp-archlinux
-          path: ./artifacts
+          path: ./artifacts/archlinux
 
       - name: Download Ubuntu artifact
         uses: actions/download-artifact@v4
         with:
           name: cozyapp-ubuntu
-          path: ./artifacts
+          path: ./artifacts/ubuntu
+
+      - name: Create zip archives
+        run: |
+          sudo apt-get update && sudo apt-get install -y zip
+          cd artifacts/archlinux
+          zip ../cozyapp-archlinux.zip cozyapp
+          cd ../ubuntu
+          zip ../cozyapp-ubuntu.zip cozyapp
+          cd ..
 
       - name: Generate release notes
         id: release_notes
