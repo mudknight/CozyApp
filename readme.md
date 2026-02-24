@@ -1,7 +1,7 @@
-<div style="display: flex; gap:10px; justify-content:center;">
-    <img width="100" src="assets/com.mudknight.cozyapp.png" alt="Icon">
-    <h1>CozyApp</h1>
-</div>
+<p align="center">
+  <img src="assets/com.mudknight.cozyapp.png" width="100" alt="Icon" style="vertical-align:middle">
+  <span style="font-size: 2em; font-weight: bold; vertical-align:middle">CozyApp</span>
+</p>
 </br>
 
 A cozy GTK frontend for ComfyUI using LibAdwaita and custom nodes, designed to simplify image generation.
