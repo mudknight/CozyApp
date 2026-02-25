@@ -890,12 +890,20 @@ class ComfyWindow(Adw.ApplicationWindow):
 
     def _on_model_selected(self, model_data):
         """Set the model dropdown and switch to the generate tab."""
+        # The API provides 'folder' (relative dir) and 'file_name' (usually no ext)
+        folder = model_data.get('folder', '')
         file_name = model_data.get('file_name', '')
-        if self.generate_page.set_model(file_name):
+
+        if folder:
+            search_path = f"{folder}/{file_name}"
+        else:
+            search_path = file_name
+
+        if self.generate_page.set_model(search_path):
             model_name = model_data.get('model_name', file_name)
             self._show_toast(f"Model set to {model_name}")
         else:
-            self.log(f"Model {file_name} not found in dropdown list")
+            self.log(f"Model {search_path} not found in dropdown list")
         self.view_stack.set_visible_child_name('generate')
 
     # ------------------------------------------------------------------

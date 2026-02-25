@@ -554,12 +554,40 @@ class GeneratePage:
         return False
 
     def set_model(self, model_name):
-        """Select a model in the model dropdown by name."""
+        """Select a model in the model dropdown by name or stem."""
+        # 1. Try exact match
         if model_name in self.model_list:
             self.model_dropdown.set_selected(
                 self.model_list.index(model_name)
             )
             return True
+
+        # 2. Try matching by stem (path/to/name without extension)
+        for i, full_path in enumerate(self.model_list):
+            # Strip extension from the dropdown item
+            stem = (
+                full_path.rsplit('.', 1)[0]
+                if '.' in full_path
+                else full_path
+            )
+            if stem == model_name:
+                self.model_dropdown.set_selected(i)
+                return True
+
+        # 3. Try matching just the filename without path or extension
+        # (Handling cases where the folder is missing from model_name)
+        search_file = model_name.split('/')[-1]
+        for i, full_path in enumerate(self.model_list):
+            filename = full_path.split('/')[-1]
+            stem = (
+                filename.rsplit('.', 1)[0]
+                if '.' in filename
+                else filename
+            )
+            if stem == search_file:
+                self.model_dropdown.set_selected(i)
+                return True
+
         return False
 
     def queue_generate(self):
