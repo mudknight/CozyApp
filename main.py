@@ -127,6 +127,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.last_cursor_x = 0
         self.last_cursor_y = 0
         self._preview_popover = None
+        self.lora_manager_available = False
 
         self.connect("close-request", self.on_close_request)
 
@@ -222,6 +223,9 @@ class ComfyWindow(Adw.ApplicationWindow):
             self.lora_manager.widget, 'lora_manager', 'LoRA Manager',
             'drive-multidisk-symbolic'
         )
+        # Initialize tab state (will be updated when availability check
+        # completes)
+        self._update_lora_manager_tab_state()
 
         self.view_stack.connect(
             'notify::visible-child', self._on_tab_changed
@@ -229,6 +233,7 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         self.setup_keybinds()
         self.generate_page.fetch_node_info()
+        self._check_lora_manager_availability()
 
         # Purge cached images older than the configured threshold
         image_cache.cleanup_old(config.get("cache_max_age_days"))
@@ -396,6 +401,42 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.generate_page.fetch_node_info()
         self.presets.refresh()
         self.lora_manager.refresh()
+        self._check_lora_manager_availability()
+
+    def _check_lora_manager_availability(self):
+        """Check if LoRA Manager API is available on the server."""
+        def worker():
+            try:
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/api/lm/loras/list?page=1&page_size=1"
+                )
+                resp = requests.get(url, timeout=3)
+                available = resp.status_code == 200
+                resp.close()
+            except Exception:
+                available = False
+            GLib.idle_add(self._on_lora_manager_check_done, available)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_lora_manager_check_done(self, available):
+        """Update LoRA Manager tab visibility and sensitivity."""
+        self.lora_manager_available = available
+        self._update_lora_manager_tab_state()
+
+    def _update_lora_manager_tab_state(self):
+        """Update tab visibility based on settings and availability."""
+        enabled = config.get("lora_manager_enabled")
+        # Get the ViewStackPage for the lora_manager tab
+        page = self.view_stack.get_page(self.lora_manager.widget)
+        if page:
+            page.set_visible(enabled)
+            # If we're on the LoRA Manager tab and it's being disabled,
+            # switch to the generate tab
+            current_page = self.view_stack.get_visible_child_name()
+            if current_page == 'lora_manager' and not enabled:
+                self.view_stack.set_visible_child_name('generate')
 
     def on_show_settings(self, action, param):
         """Show the settings dialog."""
@@ -458,6 +499,51 @@ class ComfyWindow(Adw.ApplicationWindow):
         )
         completion_group.add(completion_row)
 
+        # --- LoRA Manager group ---
+        lora_group = Adw.PreferencesGroup(
+            title="LoRA Manager",
+            description=(
+                "Enable or disable the LoRA Manager tab. "
+                "Requires ComfyUI-Lora-Manager to be installed."
+            )
+        )
+        page.add(lora_group)
+
+        lora_enabled_row = Adw.SwitchRow(
+            title="Enable LoRA Manager tab"
+        )
+        lora_enabled_row.set_active(config.get("lora_manager_enabled"))
+        lora_group.add(lora_enabled_row)
+
+        # Status indicator showing if API is available
+        if self.lora_manager_available:
+            status_text = "API available"
+            status_css = "lora-status-available"
+        else:
+            status_text = "API not available"
+            status_css = "lora-status-unavailable"
+        
+        status_row = Adw.ActionRow(
+            title="Status",
+            subtitle=status_text
+        )
+        
+        # Create status indicator with colored circular background
+        status_icon_box = Gtk.Box(
+            css_classes=["lora-status-indicator", status_css]
+        )
+        status_icon_box.set_size_request(24, 24)
+        # status_icon_box.set_vexpand(False)
+        status_icon_box.set_valign(Gtk.Align.CENTER)
+        status_icon = Gtk.Image(
+            icon_name="object-select-symbolic",
+            pixel_size=20
+        )
+        status_icon_box.append(status_icon)
+        status_row.add_suffix(status_icon_box)
+        
+        lora_group.add(status_row)
+
         # --- Tag blacklist group ---
         bl_group = Adw.PreferencesGroup(
             title="Tag Blacklist",
@@ -515,9 +601,14 @@ class ComfyWindow(Adw.ApplicationWindow):
             config.set(
                 "completion_max_items", int(completion_adj.get_value())
             )
+            config.set(
+                "lora_manager_enabled", lora_enabled_row.get_active()
+            )
             config.save()
             # Apply to the live tag completion instance
             self.generate_page.tag_completion.set_blacklist(blacklist)
+            # Update LoRA Manager tab visibility
+            self._update_lora_manager_tab_state()
 
         dialog.connect("closed", on_close)
         dialog.present(self)
@@ -586,6 +677,31 @@ class ComfyWindow(Adw.ApplicationWindow):
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        
+        # Add inline CSS for status indicators
+        status_css_provider = Gtk.CssProvider()
+        status_css = b"""
+            .lora-status-indicator {
+                border-radius: 20px;
+                min-width: 24px;
+                min-height: 24px;
+                padding: 6px;
+            }
+            .lora-status-available {
+                background-color: var(--accent-green);
+                color: white;
+            }
+            .lora-status-unavailable {
+                background-color: var(--accent-red);
+                color: white;
+            }
+        """
+        status_css_provider.load_from_data(status_css)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            status_css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 

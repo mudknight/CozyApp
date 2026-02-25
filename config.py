@@ -14,6 +14,7 @@ _DEFAULTS = {
     "tag_blacklist": [],
     "cache_max_age_days": 1,
     "completion_max_items": 10,
+    "lora_manager_enabled": True,
 }
 
 # In-memory config dict, populated by load()

@@ -69,6 +69,13 @@ class LoraManagerPage(Gtk.Box):
         self.loras.refresh()
         self.models.refresh()
 
+    def show_unavailable_message(self):
+        """
+        Show a message indicating the LoRA Manager API is unavailable.
+        """
+        # This can be called from the main window if the API check fails
+        pass  # The individual pages handle their own empty states
+
     @property
     def widget(self):
         return self

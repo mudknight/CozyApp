@@ -16,7 +16,7 @@ A cozy GTK frontend for ComfyUI using LibAdwaita and custom nodes, designed to s
 - [Impact pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack)
 - [Impact subpack](https://github.com/ltdrdata/ComfyUI-Impact-Subpack)
 - [Mudknight utils](https://github.com/mudknight/comfyui-mudknight-utils)
-- [LoRA Manager](https://github.com/willmiao/ComfyUI-Lora-Manager)
+- [LoRA Manager](https://github.com/willmiao/ComfyUI-Lora-Manager) (Optional for LoRA/Checkpoint management)
 
 ### Development
 Set up a venv:
