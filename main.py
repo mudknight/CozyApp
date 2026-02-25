@@ -519,9 +519,11 @@ class ComfyWindow(Adw.ApplicationWindow):
         if self.lora_manager_available:
             status_text = "API available"
             status_css = "lora-status-available"
+            status_icon_name = "object-select-symbolic"
         else:
             status_text = "API not available"
             status_css = "lora-status-unavailable"
+            status_icon_name = "window-close-symbolic"
         
         status_row = Adw.ActionRow(
             title="Status",
@@ -533,10 +535,9 @@ class ComfyWindow(Adw.ApplicationWindow):
             css_classes=["lora-status-indicator", status_css]
         )
         status_icon_box.set_size_request(24, 24)
-        # status_icon_box.set_vexpand(False)
         status_icon_box.set_valign(Gtk.Align.CENTER)
         status_icon = Gtk.Image(
-            icon_name="object-select-symbolic",
+            icon_name=status_icon_name,
             pixel_size=20
         )
         status_icon_box.append(status_icon)
