@@ -4,6 +4,15 @@ flowboxchild:selected .gallery-thumb {
     box-shadow: 0 0 0 3px alpha(@accent_color, 0.35);
     border-radius: 8px;
 }
+.gen-time-overlay {
+    background-color: rgba(0, 0, 0, 0.75);
+    color: white;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: monospace;
+}
 revealer { background-color: transparent; border: none; }
 .preview-panel {
     background-color: @card_bg_color;

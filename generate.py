@@ -1316,6 +1316,7 @@ class GeneratePage:
 
     def _generate_logic(self, workflow_data):
         """Execute a single generation request over WebSocket."""
+        start_time = datetime.datetime.now()
         ws = websocket.WebSocket()
         with self._active_ws_lock:
             self._active_ws = ws
@@ -1416,6 +1417,10 @@ class GeneratePage:
                     )
                     data = data_resp.content
                     data_resp.close()
+                    # Calculate generation time in seconds
+                    end_time = datetime.datetime.now()
+                    gen_time = (end_time - start_time).total_seconds()
+                    img["generation_time"] = gen_time
                     GLib.idle_add(self._on_image_final, data, img)
                     break
 

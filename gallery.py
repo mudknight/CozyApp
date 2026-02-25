@@ -246,8 +246,25 @@ class GalleryPage(Gtk.ScrolledWindow):
         # Store path instead of full-res pixbuf
         picture._cache_path = cache_path
 
+        # Create overlay container
+        overlay = Gtk.Overlay()
+        overlay.set_child(picture)
+
+        # Add generation time overlay if available
+        if image_info and 'generation_time' in image_info:
+            gen_time = image_info['generation_time']
+            time_label = Gtk.Label(
+                label=self._format_time(gen_time),
+                css_classes=['gen-time-overlay']
+            )
+            time_label.set_halign(Gtk.Align.END)
+            time_label.set_valign(Gtk.Align.END)
+            time_label.set_margin_end(6)
+            time_label.set_margin_bottom(6)
+            overlay.add_overlay(time_label)
+
         frame = Gtk.Frame(css_classes=['gallery-thumb'])
-        frame.set_child(picture)
+        frame.set_child(overlay)
 
         if prepend:
             # New generation images go to the top-left
@@ -657,13 +674,15 @@ class GalleryPage(Gtk.ScrolledWindow):
 
     def _cache_path_from_child(self, child):
         """Extract the stored cache path from a FlowBoxChild."""
-        frame = child.get_child()
-        if frame is None:
-            return None
-        picture = frame.get_child()
-        if picture is None or not hasattr(picture, '_cache_path'):
-            return None
-        return picture._cache_path
+        widget = child.get_child()
+        while widget:
+            if hasattr(widget, '_cache_path'):
+                return widget._cache_path
+            if hasattr(widget, 'get_child'):
+                widget = widget.get_child()
+            else:
+                break
+        return None
 
     def _pixbuf_from_child(self, child):
         """Lazy-load a full-res pixbuf from the child's cache path."""
@@ -679,6 +698,19 @@ class GalleryPage(Gtk.ScrolledWindow):
     # ------------------------------------------------------------------
     # Static helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _format_time(seconds: float) -> str:
+        """
+        Format generation time in a human-readable way.
+
+        Returns time in format like '1m 23s' or '45s'.
+        """
+        if seconds < 60:
+            return f"{int(seconds)}s"
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}m {secs}s"
 
     @staticmethod
     def _pixbuf_from_bytes(data: bytes):
