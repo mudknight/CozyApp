@@ -20,8 +20,7 @@ import image_cache  # noqa
 from generate import GeneratePage  # noqa
 from gallery import GalleryPage  # noqa
 from presets import PresetsPage  # noqa
-from loras import LorasPage  # noqa
-from models import ModelsPage  # noqa
+from lora_manager import LoraManagerPage  # noqa
 
 
 def setup_language_manager():
@@ -213,23 +212,14 @@ class ComfyWindow(Adw.ApplicationWindow):
             'user-bookmarks-symbolic'
         )
 
-        # LoRAs page
-        self.loras = LorasPage(
+        # LoRA Manager page (LoRAs and Models combined)
+        self.lora_manager = LoraManagerPage(
             on_lora_selected=self._on_lora_selected,
-            log_fn=self.log
-        )
-        self.view_stack.add_titled_with_icon(
-            self.loras.widget, 'loras', 'LoRAs',
-            'zoom-in-symbolic'
-        )
-
-        # Models page
-        self.models = ModelsPage(
             on_model_selected=self._on_model_selected,
             log_fn=self.log
         )
         self.view_stack.add_titled_with_icon(
-            self.models.widget, 'models', 'Models',
+            self.lora_manager.widget, 'lora_manager', 'LoRA Manager',
             'drive-multidisk-symbolic'
         )
 
@@ -405,8 +395,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Reload style/model lists and all preset sub-pages."""
         self.generate_page.fetch_node_info()
         self.presets.refresh()
-        self.loras.refresh()
-        self.models.refresh()
+        self.lora_manager.refresh()
 
     def on_show_settings(self, action, param):
         """Show the settings dialog."""
