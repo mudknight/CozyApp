@@ -88,13 +88,12 @@ class TagCard(Gtk.Frame):
         )
 
 
-class TagsPage(Gtk.ScrolledWindow):
+class TagsPage(Gtk.Box):
     """Scrollable grid of tag cards with CRUD toolbar."""
 
     def __init__(self, on_tag_selected=None, log_fn=None):
         super().__init__(
-            hscrollbar_policy=Gtk.PolicyType.NEVER,
-            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            orientation=Gtk.Orientation.VERTICAL,
             hexpand=True,
             vexpand=True
         )
@@ -102,15 +101,14 @@ class TagsPage(Gtk.ScrolledWindow):
         self.log_fn = log_fn
         self.all_tags = {}
 
-        self.outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        for side in ['top', 'bottom', 'start', 'end']:
-            getattr(self.outer, f'set_margin_{side}')(20)
-
-        # Search bar row with Add button
+        # Search bar row — outside the scroll area so it stays visible.
         search_row = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL,
             spacing=8,
-            margin_bottom=20
+            margin_top=20,
+            margin_start=20,
+            margin_end=20,
+            margin_bottom=12
         )
         self.search_entry = Gtk.SearchEntry(
             placeholder_text="Search tags...",
@@ -126,7 +124,18 @@ class TagsPage(Gtk.ScrolledWindow):
         add_btn.connect('clicked', self._on_add_clicked)
         search_row.append(add_btn)
 
-        self.outer.append(search_row)
+        self.append(search_row)
+
+        # Scrollable area contains only the flow grid
+        scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            hexpand=True,
+            vexpand=True
+        )
+        self.outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        for side in ['bottom', 'start', 'end']:
+            getattr(self.outer, f'set_margin_{side}')(20)
 
         self.flow = Gtk.FlowBox(
             max_children_per_line=10,
@@ -138,7 +147,8 @@ class TagsPage(Gtk.ScrolledWindow):
             valign=Gtk.Align.START
         )
         self.outer.append(self.flow)
-        self.set_child(self.outer)
+        scroll.set_child(self.outer)
+        self.append(scroll)
 
         self._setup_css()
         GLib.idle_add(self.fetch_tags)
