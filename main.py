@@ -1184,30 +1184,26 @@ class ComfyWindow(Adw.ApplicationWindow):
         if not self.current_pixbuf:
             return
         pixbuf = self.current_pixbuf
-        dialog = Gtk.FileChooserNative(
-            title='Save Image',
-            action=Gtk.FileChooserAction.SAVE,
-            accept_label='Save',
-            cancel_label='Cancel',
-            transient_for=self
-        )
-        dialog.set_current_name('image.png')
-        dialog.connect(
-            'response',
-            lambda d, r: self._on_preview_save_response(d, r, pixbuf)
-        )
-        dialog.show()
+        dialog = Gtk.FileDialog()
+        dialog.set_title('Save Image')
+        # Set the default filename
+        dialog.set_initial_name('image.png')
+        # Open async save dialog; callback receives the result
+        dialog.save(self, None, self._on_preview_save_response, pixbuf)
 
-    def _on_preview_save_response(self, dialog, response, pixbuf):
-        if response == Gtk.ResponseType.ACCEPT:
-            path = dialog.get_file().get_path()
-            if not path.lower().endswith('.png'):
-                path += '.png'
-            try:
-                pixbuf.savev(path, 'png', [], [])
-            except Exception as e:
-                self.log(f'Preview save error: {e}')
-        dialog.destroy()
+    def _on_preview_save_response(self, dialog, result, pixbuf):
+        try:
+            gfile = dialog.save_finish(result)
+        except Exception:
+            # User cancelled or an error occurred
+            return
+        path = gfile.get_path()
+        if not path.lower().endswith('.png'):
+            path += '.png'
+        try:
+            pixbuf.savev(path, 'png', [], [])
+        except Exception as e:
+            self.log(f'Preview save error: {e}')
 
     def _preview_delete(self):
         pixbuf = self.current_pixbuf
