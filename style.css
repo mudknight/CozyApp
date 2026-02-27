@@ -32,7 +32,7 @@ scrolledwindow.prompt-focused {
 .quick-settings-card {
     background-color: @card_bg_color;
     border-radius: 12px;
-    border: 1px solid alpha(currentColor, 0.07);
+    /* border: 1px solid alpha(currentColor, 0.07); */
 }
 .quick-settings-card:hover {
     background-color: @card_bg_color;

@@ -221,28 +221,50 @@ class GeneratePage:
 
     def _build_style_model_row(self):
         box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=20
+        )
+
+        style_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=10
         )
-        box.append(Gtk.Label(label="Style", xalign=0))
-
+        style_box.append(Gtk.Label(label="Style", xalign=0))
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
-        box.append(self.style_dropdown)
+        self.style_dropdown.set_hexpand(True)
+        style_box.append(self.style_dropdown)
 
-        box.append(
-            Gtk.Label(label="Model", xalign=0, margin_start=10)
+        model_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
+        )
+        model_box.append(
+            Gtk.Label(label="Model", xalign=0)
         )
         self.model_dropdown = Gtk.DropDown.new_from_strings([])
         self.model_dropdown.set_hexpand(True)
         self.model_dropdown.set_size_request(50, -1)
-        box.append(self.model_dropdown)
+        model_box.append(self.model_dropdown)
+
+        box.append(style_box)
+        box.append(model_box)
 
         return box
 
     def _build_seed_row(self):
         box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=20
+        )
+
+        resolution_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
+        )
+        resolution_box.append(Gtk.Label(label="Resolution", xalign=0))
+        self.resolution_dropdown = Gtk.DropDown.new_from_strings([])
+        self.resolution_dropdown.set_hexpand(True)
+        resolution_box.append(self.resolution_dropdown)
+
+        seed_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6
         )
-        box.append(Gtk.Label(label="Seed", xalign=0))
+        seed_box.append(Gtk.Label(label="Seed", xalign=0))
         self.seed_adj = Gtk.Adjustment(
             value=0, lower=0, upper=2**64 - 1, step_increment=1
         )
@@ -252,45 +274,61 @@ class GeneratePage:
         self.seed_mode_combo = Gtk.DropDown.new_from_strings(
             ["Randomize", "Fixed"]
         )
-        box.append(self.seed_entry)
-        box.append(self.seed_mode_combo)
+        seed_box.append(self.seed_entry)
+        seed_box.append(self.seed_mode_combo)
+
+        box.append(resolution_box)
+        box.append(seed_box)
         return box
 
     def _build_options_row(self):
         box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=20
+        )
+
+        portrait_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=10
         )
-
-        box.append(Gtk.Label(label="Resolution", xalign=0))
-        self.resolution_dropdown = Gtk.DropDown.new_from_strings([])
-        self.resolution_dropdown.set_hexpand(True)
-        box.append(self.resolution_dropdown)
-
-        box.append(
-            Gtk.Label(label="Portrait", xalign=0, margin_start=10)
+        portrait_box.append(
+            Gtk.Label(label="Portrait", xalign=0)
         )
         self.portrait_toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
-        box.append(self.portrait_toggle)
+        portrait_box.append(self.portrait_toggle)
 
-        box.append(
+        quality_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
+        )
+        quality_box.append(
             Gtk.Label(label="Quality", xalign=0, margin_start=10)
         )
         self.quality_tags_toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
-        box.append(self.quality_tags_toggle)
+        quality_box.append(self.quality_tags_toggle)
 
-        box.append(
+        embeddings_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
+        )
+        embeddings_box.append(
             Gtk.Label(label="Embeddings", xalign=0, margin_start=10)
         )
         self.embeddings_toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
-        box.append(self.embeddings_toggle)
+        embeddings_box.append(self.embeddings_toggle)
 
-        box.append(
+        detailer_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
+        )
+        detailer_box.append(
             Gtk.Label(label="Detailer", xalign=0, margin_start=10)
         )
         self.detailer_dropdown = Gtk.DropDown.new_from_strings(
             DETAILER_OPTIONS
         )
-        box.append(self.detailer_dropdown)
+        self.detailer_dropdown.set_hexpand(True)
+        detailer_box.append(self.detailer_dropdown)
+
+        box.append(portrait_box)
+        box.append(quality_box)
+        box.append(embeddings_box)
+        box.append(detailer_box)
 
         return box
 
