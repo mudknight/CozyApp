@@ -1186,9 +1186,32 @@ class ComfyWindow(Adw.ApplicationWindow):
         pixbuf = self.current_pixbuf
         dialog = Gtk.FileDialog()
         dialog.set_title('Save Image')
-        # Set the default filename
         dialog.set_initial_name('image.png')
-        # Open async save dialog; callback receives the result
+
+        # Start in ~/Downloads if it exists, else home directory
+        downloads = GLib.get_home_dir() + '/Downloads'
+        start_dir = (
+            downloads if GLib.file_test(downloads, GLib.FileTest.IS_DIR)
+            else GLib.get_home_dir()
+        )
+        dialog.set_initial_folder(
+            Gio.File.new_for_path(start_dir)
+        )
+
+        # Build format filters (PNG, JPEG, and all files)
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        for name, patterns in [
+            ('PNG Image', ['*.png']),
+            ('JPEG Image', ['*.jpg', '*.jpeg']),
+            ('All Files', ['*']),
+        ]:
+            f = Gtk.FileFilter()
+            f.set_name(name)
+            for p in patterns:
+                f.add_pattern(p)
+            filters.append(f)
+        dialog.set_filters(filters)
+
         dialog.save(self, None, self._on_preview_save_response, pixbuf)
 
     def _on_preview_save_response(self, dialog, result, pixbuf):
@@ -1198,12 +1221,35 @@ class ComfyWindow(Adw.ApplicationWindow):
             # User cancelled or an error occurred
             return
         path = gfile.get_path()
-        if not path.lower().endswith('.png'):
-            path += '.png'
-        try:
-            pixbuf.savev(path, 'png', [], [])
-        except Exception as e:
-            self.log(f'Preview save error: {e}')
+        ext = path.lower().split('.')[-1] if '.' in path else ''
+
+        if ext in ('jpg', 'jpeg'):
+            # Save as JPEG via ImageMagick, stripping all metadata
+            import subprocess
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(
+                suffix='.png', delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+            try:
+                pixbuf.savev(tmp_path, 'png', [], [])
+                subprocess.run(
+                    ['convert', tmp_path, '-strip', path],
+                    check=True
+                )
+            except Exception as e:
+                self.log(f'Preview save error: {e}')
+            finally:
+                os.unlink(tmp_path)
+        else:
+            # Default to PNG; append extension if missing
+            if not path.lower().endswith('.png'):
+                path += '.png'
+            try:
+                pixbuf.savev(path, 'png', [], [])
+            except Exception as e:
+                self.log(f'Preview save error: {e}')
 
     def _preview_delete(self):
         pixbuf = self.current_pixbuf
