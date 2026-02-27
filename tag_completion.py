@@ -59,6 +59,8 @@ class TagCompletion:
         self.log = log_callback if log_callback else lambda x: None
         # Set of tags to exclude from completions
         self._blacklist = set()
+        # Pending GLib.idle_add source IDs for deferred show_popup calls
+        self._pending_show_ids = []
 
     def set_blacklist(self, tags):
         """
@@ -657,12 +659,16 @@ class TagCompletion:
             # Sentinel: insert prefix and immediately show character list
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, 'character:')
-            GLib.idle_add(self.show_popup, textview, self.characters[:_max_items()])
+            self._schedule_show_popup(
+                textview, self.characters[:_max_items()]
+            )
         elif tag == 'tag' and not is_tag_preset and not is_character:
             # Sentinel: insert prefix and immediately show tag preset list
             buffer.delete(iter_start, iter_cursor)
             buffer.insert(iter_start, 'tag:')
-            GLib.idle_add(self.show_popup, textview, self.tag_presets[:_max_items()])
+            self._schedule_show_popup(
+                textview, self.tag_presets[:_max_items()]
+            )
         elif is_character:
             # Depth-aware: count colons to determine flow stage
             depth = replaced_text.count(':')
@@ -673,7 +679,7 @@ class TagCompletion:
                 outfits = self._get_outfits(tag)
                 buffer.delete(iter_start, iter_cursor)
                 buffer.insert(iter_start, f'character:{tag}:')
-                GLib.idle_add(self.show_popup, textview, outfits)
+                self._schedule_show_popup(textview, outfits)
             elif depth == 2:
                 # Completed outfit → append colon, show top/bottom
                 char_name = parts[1]
@@ -681,8 +687,8 @@ class TagCompletion:
                 buffer.insert(
                     iter_start, f'character:{char_name}:{tag}:'
                 )
-                GLib.idle_add(
-                    self.show_popup, textview, ['top', 'bottom']
+                self._schedule_show_popup(
+                    textview, ['top', 'bottom']
                 )
             elif depth == 3:
                 # Completed top/bottom → close out the tag
@@ -778,11 +784,13 @@ class TagCompletion:
             return False
 
         if keyval == Gdk.KEY_Escape:
+            self._cancel_pending_show()
             self.completion_popup.popdown()
             # Strip trailing colon if we're mid-character-flow
             self._strip_character_colon(textview)
             return True
         elif keyval in (Gdk.KEY_Left, Gdk.KEY_Right):
+            self._cancel_pending_show()
             self.completion_popup.popdown()
             return False
         elif keyval == Gdk.KEY_Down:
@@ -818,12 +826,32 @@ class TagCompletion:
                     if tag_label:
                         tag = tag_label.get_label()
                         self.insert_completion(textview, tag)
+                self._cancel_pending_show()
                 self.completion_popup.popdown()
             return True
 
         return False
 
+    def _schedule_show_popup(self, textview, suggestions):
+        """
+        Schedule show_popup via GLib.idle_add, tracking the source ID
+        so it can be cancelled if the popup is dismissed first.
+
+        Args:
+            textview: GtkSourceView to attach popup to
+            suggestions: List of tag suggestions to display
+        """
+        source_id = GLib.idle_add(self.show_popup, textview, suggestions)
+        self._pending_show_ids.append(source_id)
+
+    def _cancel_pending_show(self):
+        """Cancel all queued deferred show_popup calls."""
+        for source_id in self._pending_show_ids:
+            GLib.source_remove(source_id)
+        self._pending_show_ids.clear()
+
     def close_popup(self):
         """Close the completion popup if open."""
+        self._cancel_pending_show()
         if self.completion_popup:
             self.completion_popup.popdown()
