@@ -619,7 +619,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         dialog = Adw.AboutDialog.new()
         dialog.set_application_name("CozyApp")
         dialog.set_developer_name("mudknight")
-        dialog.set_version("1.0.0")
+        dialog.set_version("0.9.0")
         dialog.set_application_icon("com.mudknight.cozyapp")
         dialog.set_issue_url("https://github.com/mudknight/cozyapp/issues")
         dialog.set_license_type(Gtk.License.MIT_X11)
