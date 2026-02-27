@@ -5,9 +5,9 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Adw  # noqa
-from characters import CharactersPage  # noqa
-from styles import StylesPage  # noqa
-from tags import TagsPage  # noqa
+from .characters import CharactersPage  # noqa
+from .styles import StylesPage  # noqa
+from .tags import TagsPage  # noqa
 
 
 class PresetsPage(Gtk.Box):

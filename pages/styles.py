@@ -5,7 +5,7 @@ import base64
 import requests
 import gi
 import config
-import crud_dialog
+from widgets import crud_dialog
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')

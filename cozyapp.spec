@@ -8,9 +8,11 @@ block_cipher = None
 # Resource files to include
 datas = [
     ('style.css', '.'),
-    ('danbooru.csv', '.'),
-    ('workflow.json', '.'),
+    ('data/danbooru.csv', 'data'),
+    ('data/workflow.json', 'data'),
     ('assets', 'assets'),
+    ('pages', 'pages'),
+    ('widgets', 'widgets'),
 ]
 
 a = Analysis(

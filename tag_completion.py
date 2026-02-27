@@ -82,7 +82,7 @@ class TagCompletion:
             filepath: Path to the CSV file containing tags (defaults to danbooru.csv)
         """
         if filepath is None:
-            filepath = config.resource_path('danbooru.csv')
+            filepath = config.resource_path('data/danbooru.csv')
         try:
             tag_list = []
             with open(filepath, 'r', encoding='utf-8') as f:

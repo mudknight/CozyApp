@@ -16,7 +16,7 @@ gi.require_version('Pango', '1.0')
 from gi.repository import Gtk, Adw, GLib, Gdk, GtkSource, Pango  # noqa
 import config  # noqa
 from tag_completion import TagCompletion  # noqa
-from node_settings import NodeSettingsDialog, default_node_settings  # noqa
+from widgets.node_settings import NodeSettingsDialog, default_node_settings  # noqa
 
 CLIENT_ID = str(uuid.uuid4())
 

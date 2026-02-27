@@ -17,10 +17,10 @@ gi.require_version('Pango', '1.0')
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf, Pango  # noqa
 import config  # noqa
 import image_cache  # noqa
-from generate import GeneratePage  # noqa
-from gallery import GalleryPage  # noqa
-from presets import PresetsPage  # noqa
-from lora_manager import LoraManagerPage  # noqa
+from pages.generate import GeneratePage  # noqa
+from pages.gallery import GalleryPage  # noqa
+from pages.presets import PresetsPage  # noqa
+from pages.lora_manager import LoraManagerPage  # noqa
 
 
 def setup_language_manager():
@@ -85,7 +85,7 @@ class ComfyApp(Adw.Application):
 
     def do_command_line(self, command_line):
         args = command_line.get_arguments()
-        self.workflow_file = config.resource_path("workflow.json")
+        self.workflow_file = config.resource_path("data/workflow.json")
         i = 1
         while i < len(args):
             if args[i] == "-w" and i + 1 < len(args):
