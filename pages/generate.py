@@ -41,24 +41,6 @@ def setup_comment_highlighting(buffer):
         buffer.set_language(lang)
 
 
-def _make_ellipsize_factory(width_chars=1):
-    """Return a SignalListItemFactory that ellipsizes label text."""
-    factory = Gtk.SignalListItemFactory()
-
-    def setup(f, item):
-        label = Gtk.Label()
-        label.set_ellipsize(Pango.EllipsizeMode.END)
-        label.set_xalign(0)
-        label.set_max_width_chars(width_chars)
-        item.set_child(label)
-
-    def bind(f, item):
-        item.get_child().set_label(item.get_item().get_string())
-
-    factory.connect("setup", setup)
-    factory.connect("bind", bind)
-    return factory
-
 
 class GeneratePage:
     """
@@ -244,9 +226,6 @@ class GeneratePage:
         box.append(Gtk.Label(label="Style", xalign=0))
 
         self.style_dropdown = Gtk.DropDown.new_from_strings([])
-        fac = _make_ellipsize_factory(width_chars=10)
-        self.style_dropdown.set_list_factory(fac)
-        self.style_dropdown.set_factory(_make_ellipsize_factory(10))
         box.append(self.style_dropdown)
 
         box.append(
@@ -255,9 +234,6 @@ class GeneratePage:
         self.model_dropdown = Gtk.DropDown.new_from_strings([])
         self.model_dropdown.set_hexpand(True)
         self.model_dropdown.set_size_request(50, -1)
-        fac = _make_ellipsize_factory()
-        self.model_dropdown.set_list_factory(fac)
-        self.model_dropdown.set_factory(_make_ellipsize_factory())
         box.append(self.model_dropdown)
 
         return box
@@ -288,9 +264,6 @@ class GeneratePage:
         box.append(Gtk.Label(label="Resolution", xalign=0))
         self.resolution_dropdown = Gtk.DropDown.new_from_strings([])
         self.resolution_dropdown.set_hexpand(True)
-        fac = _make_ellipsize_factory()
-        self.resolution_dropdown.set_list_factory(fac)
-        self.resolution_dropdown.set_factory(_make_ellipsize_factory())
         box.append(self.resolution_dropdown)
 
         box.append(
