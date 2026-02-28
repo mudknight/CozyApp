@@ -1158,8 +1158,17 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         add_btn('Copy to Clipboard', self._preview_copy)
         add_btn('Save to\u2026', self._preview_save)
-        box.append(Gtk.Separator())
-        add_btn('Delete', self._preview_delete)
+
+        # Delete button styled to match presets/lora manager
+        del_btn = Gtk.Button(label='Delete', has_frame=False)
+        del_btn.set_halign(Gtk.Align.FILL)
+        del_btn.add_css_class('flat')
+        del_btn.add_css_class('destructive-action')
+        del_btn.connect(
+            'clicked',
+            lambda b: (popover.popdown(), self._preview_delete())
+        )
+        box.append(del_btn)
 
         popover.set_child(box)
         self._preview_popover = popover

@@ -478,10 +478,18 @@ class GalleryPage(Gtk.ScrolledWindow):
             add_btn(f'Save {n} images to folder\u2026',
                     lambda pbs=pbs: self._save_multiple(pbs, anchor_child))
 
-        box.append(Gtk.Separator())
+        # Delete button styled to match presets/lora manager
         label = 'Delete' if n == 1 else f'Delete {n} images'
         cs = list(selected)
-        add_btn(label, lambda cs=cs: self._delete_children(cs))
+        del_btn = Gtk.Button(label=label, has_frame=False)
+        del_btn.set_halign(Gtk.Align.FILL)
+        del_btn.add_css_class('flat')
+        del_btn.add_css_class('destructive-action')
+        del_btn.connect(
+            'clicked',
+            lambda b, cs=cs: (popover.popdown(), self._delete_children(cs))
+        )
+        box.append(del_btn)
 
         popover.set_child(box)
         self._active_popover = popover
