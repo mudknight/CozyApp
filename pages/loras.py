@@ -281,6 +281,8 @@ class LorasPage:
         self._total_pages = 1
         self._loading = False
         self._search_text = ''
+        # Sort direction: True = descending
+        self._sort_desc = True
         # Active sidebar filters (sets for multi-select)
         self._active_base_models = set()
         self._active_tags = set()
@@ -330,22 +332,28 @@ class LorasPage:
         toolbar.append(self._search)
 
         # Sort dropdown
-        self._sort_labels = {
-            'name': 'Name',
-            'date_modified': 'Modified',
-            'file_size': 'Size'
-        }
+        self._sort_labels = {'name': 'Name', 'date': 'Newest', 'size': 'Size'}
+        self._sort_keys = ['name', 'date', 'size']
         sort_display = Gtk.StringList.new(
-            [self._sort_labels[k] for k in ['name', 'date_modified',
-                                             'file_size']]
+            [self._sort_labels[k] for k in self._sort_keys]
         )
-        self._sort_keys = ['name', 'date_modified', 'file_size']
         self._sort_dropdown = Gtk.DropDown(model=sort_display)
         self._sort_dropdown.set_tooltip_text('Sort by')
+        # Default to 'date' (index 1)
+        self._sort_dropdown.set_selected(1)
         self._sort_dropdown.connect(
             'notify::selected', self._on_sort_changed
         )
         toolbar.append(self._sort_dropdown)
+
+        # Ascending / descending toggle
+        self._order_btn = Gtk.Button(
+            icon_name='view-sort-descending-symbolic',
+            tooltip_text='Descending'
+        )
+        self._order_btn.add_css_class('flat')
+        self._order_btn.connect('clicked', self._on_order_toggled)
+        toolbar.append(self._order_btn)
 
         # Install from URL button
         install_btn = Gtk.Button(
@@ -583,11 +591,14 @@ class LorasPage:
     # ------------------------------------------------------------------
 
     def _sort_key(self):
-        """Return the currently selected sort key string."""
+        """Return the full sort string for the API (e.g. 'date:desc')."""
         idx = self._sort_dropdown.get_selected()
         if idx == Gtk.INVALID_LIST_POSITION or idx >= len(self._sort_keys):
-            return 'name'
-        return self._sort_keys[idx]
+            base = 'name'
+        else:
+            base = self._sort_keys[idx]
+        direction = 'desc' if self._sort_desc else 'asc'
+        return f'{base}:{direction}'
 
     def _fetch_page(self, page):
         """Start a background thread to fetch page *page* from the API."""
@@ -780,6 +791,17 @@ class LorasPage:
 
     def _on_search_changed(self, entry):
         self._search_text = entry.get_text().strip()
+        self._reload()
+
+    def _on_order_toggled(self, btn):
+        """Flip sort direction and update the button icon/tooltip."""
+        self._sort_desc = not self._sort_desc
+        if self._sort_desc:
+            btn.set_icon_name('view-sort-descending-symbolic')
+            btn.set_tooltip_text('Descending')
+        else:
+            btn.set_icon_name('view-sort-ascending-symbolic')
+            btn.set_tooltip_text('Ascending')
         self._reload()
 
     def _on_sort_changed(self, dropdown, _param):
