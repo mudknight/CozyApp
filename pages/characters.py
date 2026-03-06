@@ -147,6 +147,8 @@ class CharactersPage(Gtk.Box):
         self.on_character_selected = on_character_selected
         self.log_fn = log_fn
         self.all_characters = {}
+        # Active category filters (set of category strings)
+        self._active_categories = set()
 
         # Search bar row with Add button — outside the scroll area so
         # it stays visible when the user scrolls the card grid.
@@ -158,6 +160,19 @@ class CharactersPage(Gtk.Box):
             margin_end=20,
             margin_bottom=12
         )
+
+        # Sidebar toggle button
+        self._sidebar_toggle = Gtk.ToggleButton(
+            icon_name='sidebar-show-symbolic',
+            active=True,
+            tooltip_text='Toggle sidebar'
+        )
+        self._sidebar_toggle.add_css_class('flat')
+        self._sidebar_toggle.connect(
+            'toggled', self._on_sidebar_toggled
+        )
+        search_row.append(self._sidebar_toggle)
+
         self.search_entry = Gtk.SearchEntry(
             placeholder_text="Search characters...",
             hexpand=True
@@ -173,6 +188,23 @@ class CharactersPage(Gtk.Box):
         search_row.append(add_btn)
 
         self.append(search_row)
+
+        # Horizontal pane: sidebar | scroll
+        content_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            hexpand=True,
+            vexpand=True
+        )
+        self.append(content_box)
+
+        # Sidebar wrapped in a revealer for the toggle
+        self._sidebar_revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_RIGHT,
+            reveal_child=True,
+            css_classes=['sidebar']
+        )
+        self._sidebar_revealer.set_child(self._build_sidebar())
+        content_box.append(self._sidebar_revealer)
 
         # Scrollable area contains only the flow grid
         scroll = Gtk.ScrolledWindow(
@@ -196,10 +228,166 @@ class CharactersPage(Gtk.Box):
         )
         self.outer.append(self.flow)
         scroll.set_child(self.outer)
-        self.append(scroll)
+        content_box.append(scroll)
 
         self._setup_css()
         GLib.idle_add(self.fetch_characters)
+
+    # ------------------------------------------------------------------ #
+    # Sidebar                                                              #
+    # ------------------------------------------------------------------ #
+
+    def _build_sidebar(self):
+        """Build the category filter sidebar widget."""
+        sidebar_scroll = Gtk.ScrolledWindow(
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            vexpand=True
+        )
+        sidebar_scroll.set_size_request(160, -1)
+
+        sidebar = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=0,
+            margin_top=8,
+            margin_bottom=8
+        )
+
+        # Clear filters button
+        clear_btn = Gtk.Button(
+            label='Clear Filters',
+            margin_start=8,
+            margin_end=8,
+            margin_top=4,
+            margin_bottom=4
+        )
+        clear_btn.add_css_class('flat')
+        clear_btn.connect('clicked', self._on_clear_filters)
+        sidebar.append(clear_btn)
+
+        # Categories section header
+        sidebar.append(Gtk.Label(
+            label='Category',
+            xalign=0,
+            css_classes=['caption', 'dim-label'],
+            margin_start=12,
+            margin_top=8,
+            margin_bottom=4
+        ))
+
+        # Multi-select list of categories
+        self._category_list = Gtk.ListBox(
+            selection_mode=Gtk.SelectionMode.MULTIPLE,
+            css_classes=['navigation-sidebar']
+        )
+        self._category_list.connect(
+            'selected-rows-changed', self._on_category_changed
+        )
+        self._add_toggle_gesture(self._category_list)
+        sidebar.append(self._category_list)
+
+        sidebar_scroll.set_child(sidebar)
+        return sidebar_scroll
+
+    def _make_filter_row(self, label, count):
+        """Create a ListBoxRow with a label and count badge."""
+        row = Gtk.ListBoxRow()
+        box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            margin_start=12,
+            margin_end=8,
+            margin_top=5,
+            margin_bottom=5,
+            spacing=4
+        )
+        lbl = Gtk.Label(
+            label=label,
+            xalign=0,
+            hexpand=True,
+            ellipsize=Pango.EllipsizeMode.END,
+            width_chars=1
+        )
+        box.append(lbl)
+        count_lbl = Gtk.Label(
+            label=str(count),
+            css_classes=['dim-label', 'caption']
+        )
+        box.append(count_lbl)
+        row.set_child(box)
+        # Store the category value on the row for retrieval
+        row._filter_value = label
+        return row
+
+    @staticmethod
+    def _add_toggle_gesture(listbox):
+        """Make every click toggle the row without requiring Ctrl."""
+        click = Gtk.GestureClick(button=1)
+        click.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+        def on_pressed(gesture, n_press, x, y):
+            row = listbox.get_row_at_y(int(y))
+            if row is None:
+                return
+            if row.is_selected():
+                listbox.unselect_row(row)
+            else:
+                listbox.select_row(row)
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+        click.connect('pressed', on_pressed)
+        listbox.add_controller(click)
+
+    def _populate_sidebar(self, characters):
+        """Rebuild the sidebar category list from character data."""
+        # Count occurrences of each category
+        counts = {}
+        for data in characters.values():
+            for cat in data.get('categories', '').split(','):
+                cat = cat.strip()
+                if cat:
+                    counts[cat] = counts.get(cat, 0) + 1
+
+        # Clear existing rows
+        self._category_list.handler_block_by_func(
+            self._on_category_changed
+        )
+        child = self._category_list.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._category_list.remove(child)
+            child = nxt
+        self._category_list.handler_unblock_by_func(
+            self._on_category_changed
+        )
+
+        for cat, count in sorted(counts.items()):
+            self._category_list.append(
+                self._make_filter_row(cat, count)
+            )
+
+    def _on_sidebar_toggled(self, btn):
+        """Show or hide the sidebar."""
+        self._sidebar_revealer.set_reveal_child(btn.get_active())
+
+    def _on_clear_filters(self, _btn):
+        """Deselect all sidebar rows and clear active filters."""
+        self._category_list.handler_block_by_func(
+            self._on_category_changed
+        )
+        self._category_list.unselect_all()
+        self._category_list.handler_unblock_by_func(
+            self._on_category_changed
+        )
+        self._active_categories.clear()
+        self._apply_filters()
+
+    def _on_category_changed(self, listbox):
+        """Update active category filter set from current selection."""
+        self._active_categories = {
+            row._filter_value
+            for row in listbox.get_selected_rows()
+        }
+        self._apply_filters()
 
     def _setup_css(self):
         css_provider = Gtk.CssProvider()
@@ -277,6 +465,7 @@ class CharactersPage(Gtk.Box):
         """Rebuild the FlowBox with fresh character cards."""
         self.all_characters = characters
         self._clear_grid()
+        self._populate_sidebar(characters)
         for name, data in characters.items():
             card = CharacterCard(
                 name, data,
@@ -477,14 +666,17 @@ class CharactersPage(Gtk.Box):
             lambda: self._delete_character_api(name)
         )
 
-    def _on_search_changed(self, entry):
-        search = entry.get_text().lower()
+    def _apply_filters(self):
+        """Apply search text and category filters to the FlowBox."""
+        search = self.search_entry.get_text().lower()
         child = self.flow.get_first_child()
         while child:
             card = child.get_child()
             if isinstance(card, CharacterCard):
-                visible = (
-                    search in card.name.lower()
+                # Text match across name, prompts, and categories
+                text_match = (
+                    not search
+                    or search in card.name.lower()
                     or search in card.data.get(
                         'character', ''
                     ).lower()
@@ -492,8 +684,25 @@ class CharactersPage(Gtk.Box):
                         'categories', ''
                     ).lower()
                 )
-                child.set_visible(visible)
+                # Category filter: card must have ALL selected cats
+                if self._active_categories:
+                    card_cats = {
+                        c.strip()
+                        for c in card.data.get(
+                            'categories', ''
+                        ).split(',')
+                        if c.strip()
+                    }
+                    cat_match = bool(
+                        self._active_categories & card_cats
+                    )
+                else:
+                    cat_match = True
+                child.set_visible(text_match and cat_match)
             child = child.get_next_sibling()
+
+    def _on_search_changed(self, entry):
+        self._apply_filters()
 
     @property
     def widget(self):
