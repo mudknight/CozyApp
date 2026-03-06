@@ -979,20 +979,52 @@ class ComfyWindow(Adw.ApplicationWindow):
         self.view_stack.set_visible_child_name('generate')
 
     def _on_lora_selected(self, lora_data):
-        """Insert a LoRA tag (and optional trigger words) into the prompt."""
+        """Insert a LoRA tag and trainedWords into the prompt."""
         file_name = lora_data.get('file_name', '')
+        file_path = lora_data.get('file_path', '')
         # Strip extension for the <lora:name:1> syntax
         stem = (
             file_name.rsplit('.', 1)[0]
             if '.' in file_name
             else file_name
         )
-        tag = f"<lora:{stem}:1>, "
-        _, end = self.generate_page.pos_buffer.get_bounds()
-        self.generate_page.pos_buffer.insert(end, tag)
         model_name = lora_data.get('model_name', file_name)
         self._show_toast(f"Added {model_name}")
         self.view_stack.set_visible_child_name('generate')
+
+        def worker():
+            trained_words = []
+            if file_path:
+                try:
+                    url = (
+                        f"http://{config.server_address()}"
+                        f"/api/lm/loras/metadata"
+                    )
+                    resp = requests.get(
+                        url,
+                        params={'file_path': file_path},
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        metadata = (
+                            resp.json().get('metadata') or {}
+                        )
+                        trained_words = (
+                            metadata.get('trainedWords') or []
+                        )
+                except Exception as e:
+                    self.log(f"[loras] trainedWords fetch error: {e}")
+            GLib.idle_add(_insert, stem, trained_words)
+
+        def _insert(stem, trained_words):
+            # Build: <lora:stem:1>, word1, word2, ...
+            parts = [f"<lora:{stem}:1>"]
+            parts.extend(trained_words)
+            text = ', '.join(parts) + ', '
+            _, end = self.generate_page.pos_buffer.get_bounds()
+            self.generate_page.pos_buffer.insert(end, text)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_model_selected(self, model_data):
         """Set the model dropdown and switch to the generate tab."""

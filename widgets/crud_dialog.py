@@ -582,6 +582,45 @@ def make_tag_dialog(parent, name, data, on_save):
     dialog.present(parent)
 
 
+def make_lora_dialog(parent, lora_data, metadata, on_save):
+    """
+    Show a LoRA edit dialog exposing trainedWords.
+
+    on_save(file_path, trained_words) is called with the file path and
+    a list of stripped, non-empty trigger word strings.
+    """
+    name = lora_data.get('model_name', lora_data.get('file_name', ''))
+    file_path = lora_data.get('file_path', '')
+    title = f'Edit "{name}"'
+    dialog, content, save_btn = _make_base_dialog(parent, title)
+
+    # trainedWords lives directly on the metadata object
+    existing_words = metadata.get('trainedWords', [])
+    initial_text = '\n'.join(existing_words)
+
+    words_box, words_buf = _labeled_source(
+        'Trained Words (one per line)',
+        initial_text,
+        height=120
+    )
+    content.append(words_box)
+
+    def _on_save(_btn):
+        raw = _buf_text(words_buf)
+        # Split on newlines or commas, strip whitespace, drop blanks
+        words = [
+            w.strip()
+            for part in raw.splitlines()
+            for w in part.split(',')
+            if w.strip()
+        ]
+        dialog.close()
+        on_save(file_path, words)
+
+    save_btn.connect('clicked', _on_save)
+    dialog.present(parent)
+
+
 # ---------------------------------------------------------------------------
 # Shared UI helpers
 # ---------------------------------------------------------------------------

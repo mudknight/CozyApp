@@ -11,6 +11,7 @@ gi.require_version('Adw', '1')
 gi.require_version('GdkPixbuf', '2.0')
 
 from gi.repository import Gtk, Adw, GLib, Gdk, Pango, GdkPixbuf  # noqa
+from widgets import crud_dialog  # noqa
 
 # Card thumbnail dimensions
 THUMB_SIZE = 200
@@ -40,10 +41,11 @@ def _pixbuf_to_texture(pixbuf):
 class LoraCard(Gtk.Frame):
     """A card for a single LoRA with thumbnail and name overlay."""
 
-    def __init__(self, lora_data, on_click=None):
+    def __init__(self, lora_data, on_click=None, on_edit=None):
         super().__init__(css_classes=['card'])
         self.lora_data = lora_data
         self.on_click = on_click
+        self.on_edit = on_edit
 
         self.set_size_request(THUMB_SIZE, THUMB_SIZE)
 
@@ -175,31 +177,16 @@ class LoraCard(Gtk.Frame):
             self.on_click(self.lora_data)
 
     def _on_right_click(self, gesture, n_press, x, y):
-        """Show a context menu with card actions."""
+        """Show a context menu with Edit and Delete actions."""
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        popover = Gtk.Popover(has_arrow=False)
-        popover.set_parent(self)
-        popover.set_position(Gtk.PositionType.BOTTOM)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=2,
-            margin_top=4, margin_bottom=4,
-            margin_start=4, margin_end=4
+        crud_dialog.show_card_context_menu(
+            self, x, y,
+            on_edit=(
+                (lambda: self.on_edit(self.lora_data))
+                if self.on_edit else None
+            ),
+            on_delete=self._confirm_delete
         )
-        delete_btn = Gtk.Button(label='Delete', has_frame=False)
-        delete_btn.add_css_class('destructive-action')
-        delete_btn.set_halign(Gtk.Align.FILL)
-        delete_btn.connect(
-            'clicked',
-            lambda _: (popover.popdown(), self._confirm_delete())
-        )
-        box.append(delete_btn)
-        popover.set_child(box)
-        popover.popup()
 
     def _confirm_delete(self):
         """Show a confirmation dialog before deleting."""
@@ -700,7 +687,8 @@ class LorasPage:
         for lora in items:
             card = LoraCard(
                 lora,
-                on_click=self._on_card_clicked
+                on_click=self._on_card_clicked,
+                on_edit=self._on_edit_lora
             )
             self._flow.append(card)
 
@@ -927,12 +915,69 @@ class LorasPage:
             self.log_fn(f"[loras] install exception: {e}")
 
     # ------------------------------------------------------------------
-    # Card click
+    # Card click / edit
     # ------------------------------------------------------------------
 
     def _on_card_clicked(self, lora_data):
         if self.on_lora_selected:
             self.on_lora_selected(lora_data)
+
+    def _on_edit_lora(self, lora_data):
+        """Fetch metadata then open the LoRA edit dialog."""
+        file_path = lora_data.get('file_path', '')
+        if not file_path:
+            return
+        threading.Thread(
+            target=self._fetch_metadata_and_edit,
+            args=(lora_data, file_path),
+            daemon=True
+        ).start()
+
+    def _fetch_metadata_and_edit(self, lora_data, file_path):
+        """Worker: fetch metadata and schedule dialog on main thread."""
+        try:
+            url = (
+                f"http://{config.server_address()}"
+                f"/api/lm/loras/metadata"
+            )
+            resp = requests.get(
+                url, params={'file_path': file_path}, timeout=10
+            )
+            data = resp.json() if resp.status_code == 200 else {}
+            metadata = data.get('metadata', {}) if data else {}
+        except Exception as e:
+            self.log_fn(f"[loras] metadata fetch error: {e}")
+            metadata = {}
+        GLib.idle_add(
+            crud_dialog.make_lora_dialog,
+            self._root.get_root(),
+            lora_data,
+            metadata,
+            self._save_lora_metadata
+        )
+
+    def _save_lora_metadata(self, file_path, trained_words):
+        """POST updated trainedWords to the save-metadata endpoint."""
+        def worker():
+            try:
+                url = (
+                    f"http://{config.server_address()}"
+                    f"/api/lm/loras/save-metadata"
+                )
+                payload = {
+                    'file_path': file_path,
+                    'civitai': {'trainedWords': trained_words}
+                }
+                resp = requests.post(url, json=payload, timeout=10)
+                if resp.status_code != 200:
+                    self.log_fn(
+                        f"[loras] save-metadata error "
+                        f"{resp.status_code}: {resp.text[:200]}"
+                    )
+            except Exception as e:
+                self.log_fn(f"[loras] save-metadata exception: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Public API
