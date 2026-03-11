@@ -2,6 +2,7 @@
 """Gallery page: thumbnail grid with multi-select and context menus."""
 import os
 import threading
+import subprocess
 from pathlib import Path
 import gi
 
@@ -467,6 +468,9 @@ class GalleryPage(Gtk.ScrolledWindow):
 
         if n == 1 and pixbufs:
             pb = pixbufs[0]
+            path = self._cache_path_from_child(selected[0])
+            if path:
+                add_btn('Open', lambda p=path: self._open_xdg(p))
             add_btn('Copy to Clipboard',
                     lambda pb=pb: self._copy_to_clipboard(pb))
             add_btn('Save to\u2026',
@@ -494,6 +498,10 @@ class GalleryPage(Gtk.ScrolledWindow):
         popover.set_child(box)
         self._active_popover = popover
         popover.popup()
+
+    def _open_xdg(self, path):
+        """Open the file at *path* with xdg-open."""
+        subprocess.Popen(['xdg-open', path], start_new_session=True)
 
     def _select_offset(self, offset):
         """Select the child at *offset* from the current, clamped to bounds."""

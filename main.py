@@ -2,6 +2,7 @@
 import sys
 import json
 import threading
+import subprocess
 import requests
 from urllib.parse import quote
 import tempfile
@@ -845,6 +846,7 @@ class ComfyWindow(Adw.ApplicationWindow):
         """Display the final image and add it to the gallery."""
         self.update_image(data)
         cache_path = image_cache.save_image(data, image_info)
+        self.gallery_selected_path = cache_path
         self.gallery.add_image(cache_path, image_info)
 
     # ------------------------------------------------------------------
@@ -1188,6 +1190,8 @@ class ComfyWindow(Adw.ApplicationWindow):
             btn.connect('clicked', lambda b: (popover.popdown(), cb()))
             box.append(btn)
 
+        if self.gallery_selected_path:
+            add_btn('Open', self._preview_open_xdg)
         add_btn('Copy to Clipboard', self._preview_copy)
         add_btn('Save to\u2026', self._preview_save)
 
@@ -1266,9 +1270,6 @@ class ComfyWindow(Adw.ApplicationWindow):
 
         if ext in ('jpg', 'jpeg'):
             # Save as JPEG via ImageMagick, stripping all metadata
-            import subprocess
-            import tempfile
-            import os
             with tempfile.NamedTemporaryFile(
                 suffix='.png', delete=False
             ) as tmp:
@@ -1291,6 +1292,14 @@ class ComfyWindow(Adw.ApplicationWindow):
                 pixbuf.savev(path, 'png', [], [])
             except Exception as e:
                 self.log(f'Preview save error: {e}')
+
+    def _preview_open_xdg(self):
+        """Open the current image with xdg-open."""
+        if self.gallery_selected_path:
+            subprocess.Popen(
+                ['xdg-open', self.gallery_selected_path],
+                start_new_session=True
+            )
 
     def _preview_delete(self):
         pixbuf = self.current_pixbuf
